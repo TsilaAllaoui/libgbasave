@@ -1,0 +1,22 @@
+{
+  "schema_version": 2,
+  "kind": "chip",
+  "key": "m36",
+  "aliases": [
+    "m36-e8-128k",
+    "intel-word10-128k",
+    "intel-word10",
+    "m36l0",
+    "m36l0r",
+    "m36l0t"
+  ],
+  "display_name": "M36 16 MiB",
+  "capacity_bytes": 16777216,
+  "protocol_ref": "m36-e8-128k",
+  "default_for_protocol": true,
+  "qualification": {
+    "state": "hardware-proven",
+    "date": "2026-09-04",
+    "note": "Hardware-proven M36 E8/RWW save path."
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "schema_version": 2,
+  "kind": "chip",
+  "key": "new-chip-key",
+  "aliases": [],
+  "display_name": "New NOR chip",
+  "capacity_bytes": 8388608,
+  "protocol_ref": "intel-word40",
+  "qualification": {
+    "state": "unqualified",
+    "note": "Must pass NOR qualification before release use."
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "schema_version": 2,
+  "kind": "chip",
+  "key": "m6mgd137",
+  "aliases": [
+    "m6mjd137",
+    "d137",
+    "m6mgd137w34d"
+  ],
+  "display_name": "M6MGD137W34D 16 MiB dual-die",
+  "capacity_bytes": 16777216,
+  "protocol_ref": "intel-relative-word40",
+  "default_for_protocol": true,
+  "qualification": {
+    "state": "hardware-proven",
+    "date": "2026-09-04",
+    "note": "SMA3 save persistence passed on target cart."
+  },
+  "reference_ids": [
+    {
+      "offset": 0,
+      "manufacturer": 28,
+      "device": 184
+    },
+    {
+      "offset": 8388608,
+      "manufacturer": 28,
+      "device": 185
+    }
+  ],
+  "erase_geometry": [
+    {
+      "bytes": 65536,
+      "count": 127
+    },
+    {
+      "bytes": 8192,
+      "count": 8
+    },
+    {
+      "bytes": 8192,
+      "count": 8
+    },
+    {
+      "bytes": 65536,
+      "count": 127
+    }
+  ],
+  "notes": "Lower die 1C/B8 at 0, upper die 1C/B9 at 0x800000. Protocol reserves 0x7F0000-0x80FFFF from 64 KiB save erase-domain allocation."
+}

@@ -1,0 +1,27 @@
+{
+  "schema_version": 2,
+  "kind": "chip",
+  "key": "mx26l6420mc-90",
+  "aliases": [
+    "mx26l6420",
+    "mx26",
+    "26l6420mc-90"
+  ],
+  "display_name": "MX26L6420MC-90 8 MiB",
+  "capacity_bytes": 8388608,
+  "protocol_ref": "amd-unlock-word",
+  "default_for_protocol": true,
+  "qualification": {
+    "state": "hardware-proven",
+    "date": "2026-09-04",
+    "note": "SMA3 program-only save persistence passed on target cart."
+  },
+  "reference_ids": [
+    {
+      "offset": 0,
+      "manufacturer": 194,
+      "device_word": 8956
+    }
+  ],
+  "notes": "Program-only AA/55/A0 backend. Whole-chip erase is never exposed to save runtime."
+}

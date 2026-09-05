@@ -1,0 +1,60 @@
+{
+  "schema_version": 2,
+  "kind": "protocol",
+  "key": "amd-unlock-word",
+  "driver_enum": "AmdUnlockWordProgram",
+  "display_name": "AMD unlock word program",
+  "description": "AMD unlock AA/55/A0 word program with DQ6/DQ5 completion; no safe sector erase",
+  "program_command": 160,
+  "runtime_program_selector": 160,
+  "erase_block_bytes": 0,
+  "program_unit_bytes": 2,
+  "requires_ram_execution": true,
+  "rom_address_space_limit": 8388608,
+  "mutable_main_array_end": 8388608,
+  "runtime_execution_bank_bytes": 0,
+  "supports_direct_protocol_engine": false,
+  "supports_block_erase": false,
+  "storage_forbidden_ranges": [],
+  "program_recipe": [
+    {
+      "op": "WRITE",
+      "address": "UNLOCK1",
+      "value": 170
+    },
+    {
+      "op": "WRITE",
+      "address": "UNLOCK2",
+      "value": 85
+    },
+    {
+      "op": "WRITE",
+      "address": "UNLOCK1",
+      "value": 160
+    },
+    {
+      "op": "WRITE",
+      "address": "TARGET",
+      "value": "DATA"
+    },
+    {
+      "op": "POLL_DQ6_DQ5",
+      "address": "TARGET"
+    },
+    {
+      "op": "WRITE",
+      "address": "TARGET",
+      "value": 240
+    },
+    {
+      "op": "VERIFY_EXACT",
+      "address": "TARGET",
+      "value": "DATA"
+    }
+  ],
+  "erase_recipe": null,
+  "address_constants": {
+    "UNLOCK1_CPU": 134220458,
+    "UNLOCK2_CPU": 134219092
+  }
+}

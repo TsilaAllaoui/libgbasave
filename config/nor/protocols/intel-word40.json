@@ -1,0 +1,64 @@
+{
+  "schema_version": 2,
+  "kind": "protocol",
+  "key": "intel-word40",
+  "driver_enum": "IntelStatusRegister",
+  "display_name": "Intel word40",
+  "description": "Intel status-register, proven 0x40 word program, 64 KiB erase",
+  "program_command": 64,
+  "runtime_program_selector": 64,
+  "erase_block_bytes": 65536,
+  "program_unit_bytes": 2,
+  "requires_ram_execution": true,
+  "rom_address_space_limit": 33554432,
+  "mutable_main_array_end": 33554432,
+  "runtime_execution_bank_bytes": 0,
+  "supports_direct_protocol_engine": false,
+  "supports_block_erase": true,
+  "storage_forbidden_ranges": [],
+  "program_recipe": [
+    {
+      "op": "WRITE",
+      "address": "TARGET",
+      "value": 64
+    },
+    {
+      "op": "WRITE",
+      "address": "TARGET",
+      "value": "DATA"
+    },
+    {
+      "op": "POLL_SR7",
+      "address": "TARGET"
+    },
+    {
+      "op": "RESET_ARRAY",
+      "address": "TARGET"
+    },
+    {
+      "op": "VERIFY_EXACT",
+      "address": "TARGET",
+      "value": "DATA"
+    }
+  ],
+  "erase_recipe": [
+    {
+      "op": "WRITE",
+      "address": "SECTOR",
+      "value": 32
+    },
+    {
+      "op": "WRITE",
+      "address": "SECTOR",
+      "value": 208
+    },
+    {
+      "op": "POLL_SR7",
+      "address": "SECTOR"
+    },
+    {
+      "op": "RESET_ARRAY",
+      "address": "SECTOR"
+    }
+  ]
+}

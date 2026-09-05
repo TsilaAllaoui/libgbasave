@@ -1,0 +1,55 @@
+{
+  "schema_version": 2,
+  "kind": "protocol",
+  "key": "m36-e8-128k",
+  "driver_enum": "IntelStatusRegisterWord10",
+  "display_name": "M36 buffered-RWW",
+  "description": "M36 Intel status-register, 32-byte E8 buffered program, 128 KiB main erase",
+  "program_command": 232,
+  "runtime_program_selector": 232,
+  "erase_block_bytes": 131072,
+  "program_unit_bytes": 32,
+  "requires_ram_execution": true,
+  "rom_address_space_limit": 16777216,
+  "mutable_main_array_end": 16646144,
+  "runtime_execution_bank_bytes": 1048576,
+  "supports_direct_protocol_engine": true,
+  "supports_block_erase": true,
+  "storage_forbidden_ranges": [],
+  "program_recipe": [
+    {
+      "op": "BUFFER_PROGRAM",
+      "address": "TARGET",
+      "bytes": 32
+    },
+    {
+      "op": "POLL_SR7",
+      "address": "TARGET"
+    },
+    {
+      "op": "VERIFY_EXACT",
+      "address": "TARGET",
+      "value": "DATA"
+    }
+  ],
+  "erase_recipe": [
+    {
+      "op": "WRITE",
+      "address": "SECTOR",
+      "value": 32
+    },
+    {
+      "op": "WRITE",
+      "address": "SECTOR",
+      "value": 208
+    },
+    {
+      "op": "POLL_SR7",
+      "address": "SECTOR"
+    },
+    {
+      "op": "RESET_ARRAY",
+      "address": "SECTOR"
+    }
+  ]
+}

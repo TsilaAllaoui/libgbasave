@@ -1,0 +1,16 @@
+{
+  "schema_version": 2,
+  "kind": "chip",
+  "key": "m6m",
+  "aliases": [
+    "m6"
+  ],
+  "display_name": "M6/M6M 8 MiB",
+  "capacity_bytes": 8388608,
+  "protocol_ref": "intel-word40",
+  "qualification": {
+    "state": "hardware-proven",
+    "date": "2026-09-04",
+    "note": "GBASaveHandler v1.3 save persistence proven on user hardware."
+  }
+}
