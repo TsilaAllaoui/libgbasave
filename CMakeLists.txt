@@ -110,6 +110,8 @@ set(GBASAVE_ENGINE_SOURCES
     src/save_patcher.cpp
     src/patch_report.cpp
     src/m36_compat_patcher.cpp
+    src/save_memory_patcher.cpp
+    src/save_memory_profiles.cpp
 )
 
 add_library(gbasave_objects OBJECT ${GBASAVE_ENGINE_SOURCES})
@@ -141,9 +143,10 @@ set_target_properties(gbasave_shared PROPERTIES
 target_include_directories(gbasave_shared PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/generated)
 add_library(gbasave::shared ALIAS gbasave_shared)
 
-# Allocation-free bounded-memory frontend for NDS/ESP32.  It is kept as a
-# separate static target so desktop users of the normal C++ engine do not pull
-# the constrained frontend or its SuperFW-derived scanner unless requested.
+# Allocation-free bounded-memory frontend for NDS/ESP32. It remains a
+# separately linkable static target for embedded consumers. The full desktop
+# library links it internally because the public SaveMemoryPatcher delegates to
+# the same planner/composer instead of maintaining a second implementation.
 set(GBASAVE_STREAMING_SOURCES
     src/streaming/save_plan.cpp
     src/streaming/compat_database.cpp
@@ -164,13 +167,23 @@ add_dependencies(gbasave_streaming
     gbasave_compat_db_gen
 )
 target_include_directories(gbasave_streaming PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/generated)
-set_target_properties(gbasave_streaming PROPERTIES OUTPUT_NAME gbasave_streaming)
+set_target_properties(gbasave_streaming PROPERTIES
+    OUTPUT_NAME gbasave_streaming
+    POSITION_INDEPENDENT_CODE ON
+)
 if(MSVC)
     target_compile_options(gbasave_streaming PRIVATE /W4)
 else()
     target_compile_options(gbasave_streaming PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 add_library(gbasave::streaming ALIAS gbasave_streaming)
+
+# The desktop SaveMemoryPatcher is a public high-level adapter implemented in
+# the normal library. Its bounded-memory patch semantics are provided by the
+# same streaming core used by embedded consumers. Keep that dependency inside
+# libgbasave so desktop frontends never compile private library sources.
+target_link_libraries(gbasave_static PUBLIC gbasave_streaming)
+target_link_libraries(gbasave_shared PRIVATE gbasave_streaming)
 
 add_custom_target(gbasave_runtime
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_runtime.py --root ${CMAKE_CURRENT_SOURCE_DIR} --variant all

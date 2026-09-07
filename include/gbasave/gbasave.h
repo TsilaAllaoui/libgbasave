@@ -8,5 +8,7 @@
 #include "gbasave/patch_report.h"
 #include "gbasave/rom_image.h"
 #include "gbasave/save_patcher.h"
+#include "gbasave/save_memory_patcher.h"
+#include "gbasave/save_memory_profiles.h"
 #include "gbasave/save_types.h"
 #include "gbasave/version.h"

@@ -25,6 +25,7 @@ def main() -> None:
     assert 'SaveEngine{}.patch' in wrapper_main
     assert 'SaveLibraryScanner' not in wrapper_main
     assert 'SavePatcher' not in wrapper_main
+    assert 'SaveMemoryPatcher' in wrapper_main
     assert '#include <fstream>' in wrapper_io
 
     library_production = '\n'.join(
@@ -37,15 +38,19 @@ def main() -> None:
     assert 'static RomImage load(' not in library_production
     assert 'void save(const std::string' not in library_production
 
-    for required in ('engine.h', 'rom_image.h', 'save_patcher.h', 'nor_backends.h', 'version.h'):
+    for required in ('engine.h', 'rom_image.h', 'save_patcher.h', 'save_memory_patcher.h', 'save_memory_profiles.h', 'nor_backends.h', 'version.h'):
         assert f'gbasave/{required}' in umbrella
 
     out = subprocess.check_output([str(BIN), 'nor', 'validate'], text=True)
+    assert out.startswith('PASS:')
+    out = subprocess.check_output([str(BIN), 'save-memory', 'validate'], text=True)
     assert out.startswith('PASS:')
     out = subprocess.check_output([str(BIN), 'nor', 'list'], text=True)
     assert 'libgbasave 1.0.0' in out
     for key in ('m6m', 'm36', 'm6mgd137', 'mx26l6420mc-90'):
         assert key in out
+    targets = subprocess.check_output([str(BIN), 'targets'], text=True)
+    assert 'fram_dual64_romwrite_bit0' in targets
 
     # On Linux, prove the reference wrapper is really using the shared library.
     if os.name == 'posix' and Path('/usr/bin/ldd').exists():
