@@ -15,14 +15,16 @@ def run(*args, check=True):
 def main():
     protocols=sorted((ROOT/'config/nor/protocols').glob('*.json'))
     chips=sorted((ROOT/'config/nor/chips').glob('*.json'))
-    assert len(protocols)==4 and len(chips)==5
+    assert len(protocols)>=4 and len(chips)==5
     assert not list((ROOT/'config/nor').glob('*.json')), 'v1.4 profiles must be split into protocols/ and chips/'
 
     pmap={json.loads(p.read_text())['key']:json.loads(p.read_text()) for p in protocols}
     cmap={json.loads(p.read_text())['key']:json.loads(p.read_text()) for p in chips}
-    assert set(pmap)=={'intel-word40','m36-e8-128k','intel-relative-word40','amd-unlock-word'}
+    assert {'intel-word40','intel-relative-word40','amd-unlock-word'} <= set(pmap)
+    e8=[k for k,v in pmap.items() if v.get('driver_enum') in ('IntelE8BufferedRww','IntelStatusRegisterWord10')]
+    assert len(e8)==1, f'exactly one Intel E8 RWW protocol required, got {e8}'
     assert cmap['m6m']['protocol_ref']=='intel-word40'
-    assert cmap['m36']['protocol_ref']=='m36-e8-128k'
+    assert cmap['m36']['protocol_ref']==e8[0]
     assert cmap['m6mgd137']['protocol_ref']=='intel-relative-word40'
     assert cmap['mx26l6420mc-90']['protocol_ref']=='amd-unlock-word'
     for key in ('m6m','m36','m6mgd137','mx26l6420mc-90'):

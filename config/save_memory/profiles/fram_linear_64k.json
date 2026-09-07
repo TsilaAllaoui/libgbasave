@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "key": "fram_linear_64k",
+  "display_name": "Linear 64 KiB FRAM",
+  "technology": "FRAM",
+  "capabilities": [
+    "NONVOLATILE", "BYTE_RW", "SRAM_WINDOW", "DIRECT_SRAM_GAMEPLAY",
+    "EEPROM_TO_RAM", "FLASH512_TO_RAM"
+  ],
+  "total_bytes": 65536,
+  "window_bytes": 65536,
+  "gba_window_base": 234881024,
+  "bank_count": 1,
+  "selector": { "kind": "NONE" },
+  "qualification": { "state": "generic", "note": "Generic unbanked FRAM at the GBA SRAM window." }
+}

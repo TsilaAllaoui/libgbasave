@@ -18,7 +18,7 @@ std::string toString(NorFlashType type)
 {
     switch (type) {
     case NorFlashType::IntelStatusRegister: return "Intel status-register / 0x40 word program";
-    case NorFlashType::IntelStatusRegisterWord10: return "M36 status-register / proven E8 buffered program";
+    case NorFlashType::IntelE8BufferedRww: return "M36 status-register / proven E8 buffered program";
     case NorFlashType::IntelRelativeWordProgram: return "Intel target-relative status / 0x40 word program";
     case NorFlashType::AmdUnlockWordProgram: return "AMD unlock-cycle / 0xA0 word program";
     }

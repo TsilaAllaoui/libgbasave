@@ -440,3 +440,21 @@ The preferred consumer include is `gbasave/gbasave.h`, but several low-level hea
 - GBASaveHandler moved to a separate consumer folder and links `libgbasave.so` by default.
 - Verified four hardware-proven SMA3 outputs remain byte-identical.
 - Clean-room source extraction rebuilds both runtime variants, both library forms, and the GBASaveHandler consumer; full script regression suite passes from the extracted handoff.
+
+### Current NOR profile schema compatibility
+
+The NOR profile compiler accepts the current canonical M36 driver name
+`IntelE8BufferedRww` and the historical public spelling
+`IntelStatusRegisterWord10`. Both map to ABI value 2; generated code uses the
+canonical name.
+
+`supports_direct_protocol_engine` is now a compatibility field rather than a
+required per-profile policy knob. When omitted, the generator derives it from
+the reviewed native driver contract (`true` for Intel E8 buffered RWW and
+`false` for the other current drivers). If a JSON profile specifies the field
+explicitly with a conflicting value, generation still fails closed.
+
+Intel E8 recipe validation follows `program_unit_bytes` and accepts reviewed
+power-of-two buffered chunks up to the 64-byte M36 program-buffer limit. This
+avoids tying the declarative schema to the historical 32-byte chunk while
+keeping the actual command sequence strict.

@@ -28,7 +28,7 @@ def main():
     assert 'generated_runtime_extended' in extended.read_text()
     assert 'runtime_blob_extended.h' in BUILD_RUNTIME and 'generated_runtime_extended' in BUILD_RUNTIME
     assert 'NorFlashType::IntelStatusRegister ||' in RUNTIME_IMAGE
-    assert 'NorFlashType::IntelStatusRegisterWord10' in RUNTIME_IMAGE
+    assert 'NorFlashType::IntelE8BufferedRww' in RUNTIME_IMAGE
     assert 'GBASH_ADD_ALL_RUNTIME_SYMBOLS(generated_runtime);' in RUNTIME_IMAGE
     assert 'GBASH_ADD_ALL_RUNTIME_SYMBOLS(generated_runtime_extended);' in RUNTIME_IMAGE
 

@@ -20,11 +20,24 @@ from pathlib import Path
 from typing import Any
 
 MAX_RANGES = 4
+# Public schema names accepted by the profile compiler.  The E8 driver was
+# renamed upstream to describe the actual hardware protocol.  Keep the old
+# spelling as a compatibility alias so older profile packs continue to build.
+DRIVER_ENUM_ALIASES = {
+    "IntelStatusRegisterWord10": "IntelE8BufferedRww",
+}
 ALLOWED_ENUMS = {
     "IntelStatusRegister",
+    "IntelE8BufferedRww",
     "IntelStatusRegisterWord10",
     "IntelRelativeWordProgram",
     "AmdUnlockWordProgram",
+}
+DIRECT_PROTOCOL_DEFAULTS = {
+    "IntelStatusRegister": False,
+    "IntelE8BufferedRww": True,
+    "IntelRelativeWordProgram": False,
+    "AmdUnlockWordProgram": False,
 }
 ALLOWED_RECIPE_OPS = {
     "WRITE", "POLL_SR7", "POLL_DQ6_DQ5", "CHECK_STATUS", "RESET_ARRAY",
@@ -65,11 +78,9 @@ DRIVER_SIGNATURES = {
         {"op":"RESET_ARRAY","address":"TARGET"},
         {"op":"VERIFY_EXACT","address":"TARGET","value":"DATA"},
     ]),
-    "IntelStatusRegisterWord10": recipe_signature([
-        {"op":"BUFFER_PROGRAM","address":"TARGET","bytes":32},
-        {"op":"POLL_SR7","address":"TARGET"},
-        {"op":"VERIFY_EXACT","address":"TARGET","value":"DATA"},
-    ]),
+    # The Intel E8 buffered driver is validated structurally below because
+    # current profiles may use any reviewed power-of-two chunk up to the
+    # 64-byte M36 program-buffer limit.  Do not pin the schema to 32 bytes.
     "IntelRelativeWordProgram": recipe_signature([
         {"op":"WRITE","address":"TARGET","value":0x70},
         {"op":"POLL_SR7","address":"TARGET"},
@@ -125,19 +136,51 @@ def _validate_recipe(path: Path, name: str, recipe: Any) -> None:
             raise SystemExit(f"{path}: {name}[{idx}] BUFFER_PROGRAM requires positive bytes")
 
 
+def _canonical_driver(name: str) -> str:
+    return DRIVER_ENUM_ALIASES.get(name, name)
+
+
+def _validate_e8_recipe(path: Path, obj: dict) -> None:
+    recipe = obj.get("program_recipe")
+    unit = int(obj.get("program_unit_bytes", 0))
+    if unit <= 0 or unit > 64 or (unit & (unit - 1)) != 0:
+        raise SystemExit(f"{path}: IntelE8BufferedRww program_unit_bytes must be a power of two in 1..64")
+    expected = recipe_signature([
+        {"op":"BUFFER_PROGRAM","address":"TARGET","bytes":unit},
+        {"op":"POLL_SR7","address":"TARGET"},
+        {"op":"VERIFY_EXACT","address":"TARGET","value":"DATA"},
+    ])
+    if recipe_signature(recipe) != expected:
+        raise SystemExit(
+            f"{path}: program_recipe no longer matches native driver IntelE8BufferedRww; "
+            "expected BUFFER_PROGRAM(TARGET, program_unit_bytes), POLL_SR7, VERIFY_EXACT")
+
+
 def _infer_driver(path: Path, obj: dict) -> str:
     sig = recipe_signature(obj.get("program_recipe"))
     explicit = obj.get("driver_enum")
     if explicit is not None:
         if explicit not in ALLOWED_ENUMS:
             raise SystemExit(f"{path}: unsupported driver_enum {explicit}")
-        expected = DRIVER_SIGNATURES.get(explicit)
+        canonical = _canonical_driver(explicit)
+        if canonical == "IntelE8BufferedRww":
+            _validate_e8_recipe(path, obj)
+            return canonical
+        expected = DRIVER_SIGNATURES.get(canonical)
         if expected is not None and sig != expected:
             raise SystemExit(
-                f"{path}: program_recipe no longer matches native driver {explicit}; "
+                f"{path}: program_recipe no longer matches native driver {canonical}; "
                 "create a new reusable protocol/driver instead of changing a proven recipe")
-        return explicit
+        return canonical
+
     matches = [driver for driver, expected in DRIVER_SIGNATURES.items() if sig == expected]
+    # E8 inference is deliberately structural so it remains valid if the
+    # reviewed program-buffer chunk changes from 32 to 64 bytes.
+    try:
+        _validate_e8_recipe(path, obj)
+        matches.append("IntelE8BufferedRww")
+    except SystemExit:
+        pass
     if len(matches) != 1:
         raise SystemExit(
             f"{path}: program_recipe does not map uniquely to a reviewed native driver; "
@@ -154,7 +197,7 @@ def load_protocols(protocol_dir: Path) -> dict[str, dict]:
         for key in ("key", "display_name", "description", "program_command", "erase_block_bytes",
                     "program_unit_bytes", "requires_ram_execution", "rom_address_space_limit",
                     "mutable_main_array_end", "runtime_execution_bank_bytes",
-                    "supports_direct_protocol_engine", "supports_block_erase", "program_recipe"):
+                    "supports_block_erase", "program_recipe"):
             if key not in obj:
                 raise SystemExit(f"{path}: missing {key}")
         key = obj["key"]
@@ -163,6 +206,16 @@ def load_protocols(protocol_dir: Path) -> dict[str, dict]:
         _validate_recipe(path, "program_recipe", obj.get("program_recipe"))
         _validate_recipe(path, "erase_recipe", obj.get("erase_recipe"))
         obj["driver_enum"] = _infer_driver(path, obj)
+        # Current upstream profiles may omit the legacy boolean.  Its meaning is
+        # a property of the reviewed native driver, so infer it centrally rather
+        # than duplicating that policy in every JSON profile.  Explicit values
+        # remain accepted but must agree with the driver contract.
+        expected_direct = DIRECT_PROTOCOL_DEFAULTS[obj["driver_enum"]]
+        if "supports_direct_protocol_engine" not in obj:
+            obj["supports_direct_protocol_engine"] = expected_direct
+        elif bool(obj["supports_direct_protocol_engine"]) != expected_direct:
+            raise SystemExit(
+                f"{path}: supports_direct_protocol_engine conflicts with native driver {obj['driver_enum']}")
         if int(obj["capacity_limit"] if "capacity_limit" in obj else obj["rom_address_space_limit"]) <= 0:
             raise SystemExit(f"{path}: invalid capacity limit")
         program_unit = int(obj["program_unit_bytes"])

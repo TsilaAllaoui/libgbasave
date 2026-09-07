@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "key": "fram_dual64_romwrite_bit0",
+  "display_name": "128 KiB FRAM / dual 64 KiB SRAM windows",
+  "technology": "FRAM",
+  "capabilities": [
+    "NONVOLATILE", "BYTE_RW", "SRAM_WINDOW", "BANKED_WINDOW",
+    "DIRECT_SRAM_GAMEPLAY", "EEPROM_TO_RAM", "FLASH512_TO_RAM",
+    "FLASH1M_TO_BANKED_RAM"
+  ],
+  "total_bytes": 131072,
+  "window_bytes": 65536,
+  "gba_window_base": 234881024,
+  "bank_count": 2,
+  "selector": {
+    "kind": "ROM_WRITE_DATA_BITS",
+    "gba_address": 150994944,
+    "fixed_value": 0,
+    "mask": 1,
+    "shift": 0,
+    "write_width": 16
+  },
+  "qualification": {
+    "state": "hardware-proven",
+    "note": "Semantics proven on the S29GL01GS/ChisFlash 1M FRAM cartridge: 128 KiB total, two 64 KiB banks, ROM write data bit 0 selects the bank. The profile describes save-memory wiring, not the NOR chip."
+  }
+}

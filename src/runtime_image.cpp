@@ -35,7 +35,7 @@ RuntimeImage loadEmbeddedRuntimeImage(NorFlashType norFlashType)
     RuntimeImage image;
     const bool useLegacyRuntime =
         norFlashType == NorFlashType::IntelStatusRegister ||
-        norFlashType == NorFlashType::IntelStatusRegisterWord10;
+        norFlashType == NorFlashType::IntelE8BufferedRww;
 
     const auto add = [&](const char *name, std::size_t offset, bool thumb) {
         image.symbolOffsets.emplace(name, offset | (thumb ? 1u : 0u));

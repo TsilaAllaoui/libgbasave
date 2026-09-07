@@ -19,26 +19,22 @@ namespace gbasave {
 namespace {
 
 constexpr std::uint32_t kGbaRomBase = 0x08000000u;
-constexpr std::size_t GBS2_ORIG=0x10, GBS2_BLOCK=0x14, GBS2_SIZE=0x18, GBS2_BACKUP=0x1C, GBS2_HOTKEY=0x20, GBS2_ENTRY=0x134;
-constexpr std::size_t COMPACT_B0=0x0C, COMPACT_SECTORS=0x24, COMPACT_MAGIC=0x28, COMPACT_DISPATCH=0x34;
-constexpr std::uint32_t COMPACT_LAYOUT_MAGIC=0x314D4336u;
-
 
 const NorBackendDescriptor &directBackend()
 {
-    return norBackendDescriptor(NorFlashType::IntelStatusRegisterWord10);
+    return norBackendDescriptor(NorFlashType::IntelE8BufferedRww);
 }
 
 struct StubDesc { std::size_t offset; std::size_t length; std::size_t literal; bool hasLiteral; };
-constexpr StubDesc S_EE_READ{0x00,0x20,0,false};
-constexpr StubDesc S_FR{0x40,0x20,0x1C,true};
-constexpr StubDesc S_FEC{0x60,0x18,0x14,true};
-constexpr StubDesc S_FES{0x78,0x1C,0x18,true};
-constexpr StubDesc S_FWS{0x94,0x20,0x1C,true};
-constexpr StubDesc S_FWB{0xB4,0x1C,0x18,true};
-constexpr StubDesc S_ID512{0xD0,8,0,false};
-constexpr StubDesc S_ID1M{0xD8,8,0,false};
-constexpr StubDesc S_RET0{0xE0,4,0,false};
+constexpr StubDesc S_EE_READ{generated_m36_assets::kStubEepromReadOffset, generated_m36_assets::kStubEepromReadLength, 0u, false};
+constexpr StubDesc S_FR{generated_m36_assets::kStubFlashReadOffset, generated_m36_assets::kStubFlashReadLength, generated_m36_assets::kStubFlashReadDispatchOffset, true};
+constexpr StubDesc S_FEC{generated_m36_assets::kStubFlashEraseChipOffset, generated_m36_assets::kStubFlashEraseChipLength, generated_m36_assets::kStubFlashEraseChipDispatchOffset, true};
+constexpr StubDesc S_FES{generated_m36_assets::kStubFlashEraseSectorOffset, generated_m36_assets::kStubFlashEraseSectorLength, generated_m36_assets::kStubFlashEraseSectorDispatchOffset, true};
+constexpr StubDesc S_FWS{generated_m36_assets::kStubFlashWriteSectorOffset, generated_m36_assets::kStubFlashWriteSectorLength, generated_m36_assets::kStubFlashWriteSectorDispatchOffset, true};
+constexpr StubDesc S_FWB{generated_m36_assets::kStubFlashWriteByteOffset, generated_m36_assets::kStubFlashWriteByteLength, generated_m36_assets::kStubFlashWriteByteDispatchOffset, true};
+constexpr StubDesc S_ID512{generated_m36_assets::kStubFlashIdent512Offset, generated_m36_assets::kStubFlashIdent512Length, 0u, false};
+constexpr StubDesc S_ID1M{generated_m36_assets::kStubFlashIdent1mOffset, generated_m36_assets::kStubFlashIdent1mLength, 0u, false};
+constexpr StubDesc S_RET0{generated_m36_assets::kStubThumbRet0Offset, generated_m36_assets::kStubThumbRet0Length, 0u, false};
 
 std::size_t alignUp(std::size_t v, std::size_t a) { return (v+a-1u)&~(a-1u); }
 std::uint32_t crc32(const std::vector<std::uint8_t>& b) {
@@ -253,18 +249,18 @@ PatchReport patchM36HardwareProvenRoute(RomImage &rom,const SaveLibraryMatch &sa
     if(saveLibrary.type==SaveType::Sram) {
         auto m=layoutM36Sram(original,holes,m36Capacity); ensureRom(rom,m.output,m36Capacity);
         std::vector<std::uint8_t> pay(std::begin(generated_m36_assets::kM36SramPayload),std::end(generated_m36_assets::kM36SramPayload));
-        write32(pay,GBS2_ORIG,originalEntry); write32(pay,GBS2_BLOCK,static_cast<std::uint32_t>(m.storage[0])); write32(pay,GBS2_SIZE,0x8000u); write32(pay,GBS2_BACKUP,0xFFFFFFFFu); write32(pay,GBS2_HOTKEY,0xF9u);
-        rom.write(m.payload,pay.data(),pay.size()); rom.write32(0u,armBranch(kGbaRomBase,kGbaRomBase+static_cast<std::uint32_t>(m.payload+GBS2_ENTRY)));
+        write32(pay,generated_m36_assets::kSramConfigOriginalEntry,originalEntry); write32(pay,generated_m36_assets::kSramConfigSaveBlock,static_cast<std::uint32_t>(m.storage[0])); write32(pay,generated_m36_assets::kSramConfigSaveSize,0x8000u); write32(pay,generated_m36_assets::kSramConfigRamBackup,0xFFFFFFFFu); write32(pay,generated_m36_assets::kSramConfigHotkeyRaw,0xF9u);
+        rom.write(m.payload,pay.data(),pay.size()); rom.write32(0u,armBranch(kGbaRomBase,kGbaRomBase+static_cast<std::uint32_t>(m.payload+generated_m36_assets::kSramEntryOffset)));
         const std::array<std::uint8_t,4> chain={0xF4,0x7F,0x00,0x03};
         for(std::size_t i=0;i<p->irqCount;++i) { auto off=generated_gbabr_plan::kIrqs[p->firstIrq+i]; if(original.u32(off)!=0x03007FFCu) throw std::runtime_error("M36 SRAM IRQ op no longer matches exact ROM"); rom.write(off,chain.data(),chain.size()); }
-        report.storage=reportLayout(m,StorageLayoutKind::FixedSramMirror); report.runtimeOffset=m.payload; report.runtimeSize=pay.size(); report.runtimePlacementSource=m.payloadInternal?RuntimePlacementSource::InternalSafeHole:RuntimePlacementSource::AppendedTail; report.sramHotkeyOnly=true; report.sramUsesGameOwnedShadowSnapshot=false; report.sramShadowAddress=0x0E000000u; report.routines.push_back({"M36 R37A SRAM GBS2/GBJ4 payload",m.payload,kGbaRomBase+static_cast<std::uint32_t>(m.payload+GBS2_ENTRY)}); return report;
+        report.storage=reportLayout(m,StorageLayoutKind::FixedSramMirror); report.runtimeOffset=m.payload; report.runtimeSize=pay.size(); report.runtimePlacementSource=m.payloadInternal?RuntimePlacementSource::InternalSafeHole:RuntimePlacementSource::AppendedTail; report.sramHotkeyOnly=true; report.sramUsesGameOwnedShadowSnapshot=false; report.sramShadowAddress=0x0E000000u; report.routines.push_back({"M36 R37A SRAM GBS2/GBJ4 payload",m.payload,kGbaRomBase+static_cast<std::uint32_t>(m.payload+generated_m36_assets::kSramEntryOffset)}); return report;
     }
 
     if(saveLibrary.type==SaveType::Flash512 || saveLibrary.type==SaveType::Flash1M) {
         auto m=layoutM36(original,holes,6u,m36Capacity); ensureRom(rom,m.output,m36Capacity);
         std::vector<std::uint8_t> pay(std::begin(generated_m36_assets::kM36CompactPayload),std::end(generated_m36_assets::kM36CompactPayload));
         for(std::size_t i=0;i<6;++i)
-            write32(pay,COMPACT_B0+4u*i,static_cast<std::uint32_t>(m.storage[i]));
+            write32(pay,generated_m36_assets::kFlashCompactConfigBlock0+4u*i,static_cast<std::uint32_t>(m.storage[i]));
         if (saveLibrary.geometry.sectorBytes == 0u ||
             saveLibrary.geometry.totalBytes == 0u ||
             (saveLibrary.geometry.totalBytes % saveLibrary.geometry.sectorBytes) != 0u)
@@ -273,9 +269,9 @@ PatchReport patchM36HardwareProvenRoute(RomImage &rom,const SaveLibraryMatch &sa
             saveLibrary.geometry.totalBytes / saveLibrary.geometry.sectorBytes;
         if (logicalSectorCount == 0u || logicalSectorCount > 32u)
             throw std::runtime_error("M36 compact FLASH engine supports 1..32 logical sectors");
-        write32(pay,COMPACT_SECTORS,static_cast<std::uint32_t>(logicalSectorCount));
-        write32(pay,COMPACT_MAGIC,COMPACT_LAYOUT_MAGIC);
-        rom.write(m.payload,pay.data(),pay.size()); const std::uint32_t dispatch=kGbaRomBase+static_cast<std::uint32_t>(m.payload+COMPACT_DISPATCH);
+        write32(pay,generated_m36_assets::kFlashCompactConfigSectorCount,static_cast<std::uint32_t>(logicalSectorCount));
+        write32(pay,generated_m36_assets::kFlashCompactConfigLayoutMagic,generated_m36_assets::kFlashCompactLayoutMagicValue);
+        rom.write(m.payload,pay.data(),pay.size()); const std::uint32_t dispatch=kGbaRomBase+static_cast<std::uint32_t>(m.payload+generated_m36_assets::kFlashCompactDispatchOffset);
         for(std::size_t i=0;i<p->opCount;++i){const auto&o=generated_gbabr_plan::kOps[p->firstOp+i]; switch(o.kind){case 3:patchStub(rom,o.offset,S_FR,dispatch);break;case 4:patchStub(rom,o.offset,S_FEC,dispatch);break;case 5:patchStub(rom,o.offset,S_FES,dispatch);break;case 6:patchStub(rom,o.offset,S_FWS,dispatch);break;case 7:patchStub(rom,o.offset,S_FWB,dispatch);break;case 8:patchStub(rom,o.offset,saveLibrary.type==SaveType::Flash1M?S_ID1M:S_ID512);break;case 9:case 10:patchStub(rom,o.offset,S_RET0);break;default:applyRawOp(rom,o);break;}}
         report.storage=reportLayout(m,StorageLayoutKind::FlashVersionedSlots); report.runtimeOffset=m.payload; report.runtimeSize=pay.size(); report.runtimePlacementSource=m.payloadInternal?RuntimePlacementSource::InternalSafeHole:RuntimePlacementSource::AppendedTail; report.flashVersionsPerSector=0u; report.flashSpillBlockCount=0u; report.routines.push_back({"M36 R13G FLASH compact dispatcher",m.payload,dispatch}); return report;
     }

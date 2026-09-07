@@ -28,7 +28,7 @@ inline constexpr std::array<NorBackendDescriptor, 4> kGeneratedNorBackends = {
         {NorStorageForbiddenRange{}, NorStorageForbiddenRange{}, NorStorageForbiddenRange{}, NorStorageForbiddenRange{}}, 0u
     },
     NorBackendDescriptor{
-        NorFlashType::IntelStatusRegisterWord10, "m36-e8-128k", "M36 buffered-RWW", "M36 Intel status-register, 32-byte E8 buffered program, 128 KiB main erase",
+        NorFlashType::IntelE8BufferedRww, "m36-e8-128k", "M36 buffered-RWW", "M36 Intel status-register, 32-byte E8 buffered program, 128 KiB main erase",
         0x00E8u, 0x00E8u, 131072u, 32u,
         true, 16777216u, 16646144u,
         1048576u, true, true,
@@ -40,7 +40,7 @@ struct GeneratedNorTargetAlias { const char *alias; std::size_t targetIndex; };
 
 inline constexpr std::array<NorTargetProfileDescriptor, 5> kGeneratedNorTargets = {
     NorTargetProfileDescriptor{"intel-word40", "Generic Intel word40 (capacity up to GBA limit)", NorFlashType::IntelStatusRegister, 33554432u, "intel-word40", "compatibility-only", "unspecified", "Legacy generic target retained for source/CLI compatibility; prefer an exact chip profile."},
-    NorTargetProfileDescriptor{"m36", "M36 16 MiB", NorFlashType::IntelStatusRegisterWord10, 16777216u, "m36-e8-128k", "hardware-proven", "unspecified", "Hardware-proven M36 E8/RWW save path."},
+    NorTargetProfileDescriptor{"m36", "M36 16 MiB", NorFlashType::IntelE8BufferedRww, 16777216u, "m36-e8-128k", "hardware-proven", "unspecified", "Hardware-proven M36 E8/RWW save path."},
     NorTargetProfileDescriptor{"m6m", "M6/M6M 8 MiB", NorFlashType::IntelStatusRegister, 8388608u, "intel-word40", "hardware-proven", "unspecified", "GBASaveHandler v1.3 save persistence proven on user hardware."},
     NorTargetProfileDescriptor{"m6mgd137", "M6MGD137W34D 16 MiB dual-die", NorFlashType::IntelRelativeWordProgram, 16777216u, "intel-relative-word40", "hardware-proven", "+0x0:0x1C/0xB8, +0x800000:0x1C/0xB9", "SMA3 save persistence passed on target cart."},
     NorTargetProfileDescriptor{"mx26l6420mc-90", "MX26L6420MC-90 8 MiB", NorFlashType::AmdUnlockWordProgram, 8388608u, "amd-unlock-word", "hardware-proven", "+0x0:0xC2/0x22FC", "SMA3 program-only save persistence passed on target cart."},

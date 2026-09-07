@@ -20,10 +20,13 @@ enum class NorFlashType : std::uint16_t {
     // target-local 0x40 word-program setup. Keep value 1 for v0.26 compatibility.
     IntelStatusRegister = 1,
 
-    // M36L0R/M36L0T-compatible profile. Historical enum name retained for
-    // CLI/source compatibility; runtime save programming uses the hardware-proven
-    // R37A E8-buffered/protocol-specific engines, not speculative 0x10 writes.
-    IntelStatusRegisterWord10 = 2,
+    // M36L0R/M36L0T-compatible Intel E8 buffered RWW profile.
+    // This is the canonical name from the current NOR protocol schema.
+    IntelE8BufferedRww = 2,
+
+    // Historical public name retained as a source/ABI-compatible alias.
+    // New code and generated tables should use IntelE8BufferedRww.
+    IntelStatusRegisterWord10 = IntelE8BufferedRww,
 
     // Intel-compatible target-relative status/program protocol used by the
     // dual-die M6MGD137W34D profile. Kept separate from the hardware-proven
