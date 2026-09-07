@@ -3,8 +3,8 @@
   "kind": "protocol",
   "key": "intel-e8-rww-128k",
   "driver_enum": "IntelE8BufferedRww",
-  "display_name": "Intel E8 buffered RWW / 128 KiB erase",
-  "description": "Intel status-register, 32-byte E8 buffered program, 128 KiB erase, bank-separated RWW save runtime",
+  "display_name": "Intel E8 buffered RWW (128 KiB erase)",
+  "description": "Intel status-register RWW protocol with E8 buffered program and 128 KiB main-array erase",
   "program_command": 232,
   "runtime_program_selector": 232,
   "erase_block_bytes": 131072,
@@ -15,7 +15,6 @@
   "runtime_execution_bank_bytes": 1048576,
   "supports_block_erase": true,
   "storage_forbidden_ranges": [],
-  "supports_direct_protocol_engine": false,
   "program_recipe": [
     {
       "op": "BUFFER_PROGRAM",
@@ -51,6 +50,5 @@
       "op": "RESET_ARRAY",
       "address": "SECTOR"
     }
-  ],
-  "direct_patch_engine": "rww-compact-v1"
+  ]
 }

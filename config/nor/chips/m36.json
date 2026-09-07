@@ -12,7 +12,7 @@
   ],
   "display_name": "M36 16 MiB",
   "capacity_bytes": 16777216,
-  "protocol_ref": "m36-e8-128k",
+  "protocol_ref": "intel-e8-rww-128k",
   "default_for_protocol": true,
   "qualification": {
     "state": "hardware-proven",

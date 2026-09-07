@@ -10,9 +10,9 @@ config/nor/chips/m6m.json
 config/nor/chips/m6mgd137.json
 config/nor/chips/mx26l6420mc90.json
 config/nor/protocols/amd-unlock-word.json
+config/nor/protocols/intel-e8-rww-128k.json
 config/nor/protocols/intel-relative-word40.json
 config/nor/protocols/intel-word40.json
-config/nor/protocols/m36-e8-128k.json
 config/save_memory/profiles/fram_dual64_romwrite_bit0.json
 config/save_memory/profiles/fram_linear_64k.json
 config/save_memory/profiles/sram_linear_32k.json
@@ -126,6 +126,7 @@ tests/test_irq_interposer_transparency.py
 tests/test_multisave_profiles.py
 tests/test_no_title_hardcodes.py
 tests/test_nor_backend_profiles.py
+tests/test_nor_protocol_coverage.py
 tests/test_phase08_spill_model.py
 tests/test_phase09_flash_semantics.py
 tests/test_phase10_sma4_stock_wrappers.py

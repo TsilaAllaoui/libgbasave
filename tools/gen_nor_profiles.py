@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -206,16 +207,19 @@ def load_protocols(protocol_dir: Path) -> dict[str, dict]:
         _validate_recipe(path, "program_recipe", obj.get("program_recipe"))
         _validate_recipe(path, "erase_recipe", obj.get("erase_recipe"))
         obj["driver_enum"] = _infer_driver(path, obj)
-        # Current upstream profiles may omit the legacy boolean.  Its meaning is
-        # a property of the reviewed native driver, so infer it centrally rather
-        # than duplicating that policy in every JSON profile.  Explicit values
-        # remain accepted but must agree with the driver contract.
+        # Direct-protocol capability belongs to the reviewed native driver, not
+        # to per-profile JSON.  Older profile packs may still carry the legacy
+        # boolean, including stale values.  Accept it as a deprecated hint and
+        # always canonicalize to the native-driver contract.
         expected_direct = DIRECT_PROTOCOL_DEFAULTS[obj["driver_enum"]]
-        if "supports_direct_protocol_engine" not in obj:
-            obj["supports_direct_protocol_engine"] = expected_direct
-        elif bool(obj["supports_direct_protocol_engine"]) != expected_direct:
-            raise SystemExit(
-                f"{path}: supports_direct_protocol_engine conflicts with native driver {obj['driver_enum']}")
+        if "supports_direct_protocol_engine" in obj and \
+           bool(obj["supports_direct_protocol_engine"]) != expected_direct:
+            print(
+                f"{path}: warning: deprecated supports_direct_protocol_engine="
+                f"{bool(obj['supports_direct_protocol_engine'])} ignored; native driver "
+                f"{obj['driver_enum']} requires {expected_direct}",
+                file=sys.stderr)
+        obj["supports_direct_protocol_engine"] = expected_direct
         if int(obj["capacity_limit"] if "capacity_limit" in obj else obj["rom_address_space_limit"]) <= 0:
             raise SystemExit(f"{path}: invalid capacity limit")
         program_unit = int(obj["program_unit_bytes"])
@@ -310,11 +314,15 @@ def load_chips(chip_dir: Path, protocols: dict[str, dict]) -> list[dict]:
     if not chips:
         raise SystemExit(f"no NOR chip profiles found in {chip_dir}")
     for pkey in protocols:
+        users = [c["key"] for c in chips if c["protocol_ref"] == pkey]
+        if not users:
+            raise SystemExit(
+                f"protocol {pkey}: no chip profile references this protocol; "
+                "remove the orphan protocol or migrate a chip profile to it")
         if pkey not in defaults:
-            users = [c["key"] for c in chips if c["protocol_ref"] == pkey]
             if len(users) == 1:
                 defaults[pkey] = users[0]
-            elif users:
+            else:
                 raise SystemExit(f"protocol {pkey}: exactly one chip must set default_for_protocol=true")
     return chips
 

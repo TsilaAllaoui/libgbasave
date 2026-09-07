@@ -30,7 +30,7 @@ def main():
         obj=json.loads(old.read_text())
         obj['key']='intel-e8-rww-128k'
         obj['driver_enum']='IntelE8BufferedRww'
-        obj.pop('supports_direct_protocol_engine',None)
+        obj['supports_direct_protocol_engine']=False
         new=tmp/'config/nor/protocols/intel-e8-rww-128k.json'
         new.write_text(json.dumps(obj,indent=2)+'\n')
         if old != new: old.unlink()
@@ -46,10 +46,10 @@ def main():
         out=(tmp/'generated/nor_profile_db.h').read_text()
         assert 'NorFlashType::IntelE8BufferedRww' in out
         assert '"intel-e8-rww-128k"' in out
-        # Missing legacy flag must infer to true for the reviewed E8 driver.
+        # Stale legacy flag must be ignored and canonicalized to true for the reviewed E8 driver.
         line=out.split('"intel-e8-rww-128k"',1)[1].split('},',1)[0]
         assert 'true, true' in line.replace('\n',' '), line
 
-    print('PASS current NOR schema compatibility: IntelE8BufferedRww + inferred direct protocol engine')
+    print('PASS current NOR schema compatibility: IntelE8BufferedRww + stale legacy capability canonicalized')
 
 if __name__=='__main__': main()

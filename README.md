@@ -285,7 +285,8 @@ config/nor/protocols/*.json
 Current reviewed protocols:
 
 - `intel-word40`
-- `m36-e8-128k`
+- `intel-e8-rww-128k`
+  - Legacy `m36-e8-128k` remains accepted as an M36 target alias for compatibility.
 - `intel-relative-word40`
 - `amd-unlock-word`
 

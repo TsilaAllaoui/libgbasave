@@ -88,7 +88,7 @@ def infer_protocol_from_flashgbx(profile: dict) -> str | None:
         for key in ("buffer_write", "write_buffer", "buffered_write"):
             seq = _sequence(commands, key)
             if any(value == 0xE8 for _addr, value in seq):
-                return "m36-e8-128k"
+                return "intel-e8-rww-128k"
 
     if command_set == "AMD":
         if len(single) >= 4:
