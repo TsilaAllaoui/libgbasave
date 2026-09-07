@@ -123,6 +123,7 @@ tests/test_exact_flash_compat_and_size.py
 tests/test_fusion_exact_regression.py
 tests/test_gbabr_hole_selection.py
 tests/test_irq_interposer_transparency.py
+tests/test_m36_protocol_canonicalization.py
 tests/test_multisave_profiles.py
 tests/test_no_title_hardcodes.py
 tests/test_nor_backend_profiles.py

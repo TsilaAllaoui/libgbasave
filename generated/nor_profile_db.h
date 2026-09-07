@@ -38,40 +38,44 @@ inline constexpr std::array<NorBackendDescriptor, 4> kGeneratedNorBackends = {
 
 struct GeneratedNorTargetAlias { const char *alias; std::size_t targetIndex; };
 
-inline constexpr std::array<NorTargetProfileDescriptor, 5> kGeneratedNorTargets = {
+inline constexpr std::array<NorTargetProfileDescriptor, 6> kGeneratedNorTargets = {
     NorTargetProfileDescriptor{"intel-word40", "Generic Intel word40 (capacity up to GBA limit)", NorFlashType::IntelStatusRegister, 33554432u, "intel-word40", "compatibility-only", "unspecified", "Legacy generic target retained for source/CLI compatibility; prefer an exact chip profile."},
+    NorTargetProfileDescriptor{"m28w640fs-t70za6", "M28W640FS-T70ZA6 8 MiB", NorFlashType::IntelStatusRegister, 8388608u, "intel-word40", "unqualified", "unspecified", "User hardware has proven the FAST40 program/verify path and the physical NVRP skip. libgbasave save persistence on this target is not yet hardware-qualified. The bottom 8 x 8 KiB parameter area and physical read-protected 0x40000-0x5FFFF window are excluded from libgbasave runtime/save allocation. Logical-to-physical ROM relocation around the read-protected hole remains a consumer/flasher responsibility."},
     NorTargetProfileDescriptor{"m36", "M36 16 MiB", NorFlashType::IntelE8BufferedRww, 16777216u, "intel-e8-rww-128k", "hardware-proven", "unspecified", "Hardware-proven M36 E8/RWW save path."},
     NorTargetProfileDescriptor{"m6m", "M6/M6M 8 MiB", NorFlashType::IntelStatusRegister, 8388608u, "intel-word40", "hardware-proven", "unspecified", "GBASaveHandler v1.3 save persistence proven on user hardware."},
     NorTargetProfileDescriptor{"m6mgd137", "M6MGD137W34D 16 MiB dual-die", NorFlashType::IntelRelativeWordProgram, 16777216u, "intel-relative-word40", "hardware-proven", "+0x0:0x1C/0xB8, +0x800000:0x1C/0xB9", "SMA3 save persistence passed on target cart."},
     NorTargetProfileDescriptor{"mx26l6420mc-90", "MX26L6420MC-90 8 MiB", NorFlashType::AmdUnlockWordProgram, 8388608u, "amd-unlock-word", "hardware-proven", "+0x0:0xC2/0x22FC", "SMA3 program-only save persistence passed on target cart."},
 };
 
-inline constexpr std::array<GeneratedNorTargetAlias, 19> kGeneratedNorTargetAliases = {
+inline constexpr std::array<GeneratedNorTargetAlias, 22> kGeneratedNorTargetAliases = {
     GeneratedNorTargetAlias{"intel-word40", 0u},
     GeneratedNorTargetAlias{"generic-intel-word40", 0u},
-    GeneratedNorTargetAlias{"m36", 1u},
-    GeneratedNorTargetAlias{"m36-e8-128k", 1u},
-    GeneratedNorTargetAlias{"intel-word10-128k", 1u},
-    GeneratedNorTargetAlias{"intel-word10", 1u},
-    GeneratedNorTargetAlias{"m36l0", 1u},
-    GeneratedNorTargetAlias{"m36l0r", 1u},
-    GeneratedNorTargetAlias{"m36l0t", 1u},
-    GeneratedNorTargetAlias{"m6m", 2u},
-    GeneratedNorTargetAlias{"m6", 2u},
-    GeneratedNorTargetAlias{"m6mgd137", 3u},
-    GeneratedNorTargetAlias{"m6mjd137", 3u},
-    GeneratedNorTargetAlias{"d137", 3u},
-    GeneratedNorTargetAlias{"m6mgd137w34d", 3u},
-    GeneratedNorTargetAlias{"mx26l6420mc-90", 4u},
-    GeneratedNorTargetAlias{"mx26l6420", 4u},
-    GeneratedNorTargetAlias{"mx26", 4u},
-    GeneratedNorTargetAlias{"26l6420mc-90", 4u},
+    GeneratedNorTargetAlias{"m28w640fs-t70za6", 1u},
+    GeneratedNorTargetAlias{"m28w640fs", 1u},
+    GeneratedNorTargetAlias{"m28", 1u},
+    GeneratedNorTargetAlias{"m36", 2u},
+    GeneratedNorTargetAlias{"m36-e8-128k", 2u},
+    GeneratedNorTargetAlias{"intel-word10-128k", 2u},
+    GeneratedNorTargetAlias{"intel-word10", 2u},
+    GeneratedNorTargetAlias{"m36l0", 2u},
+    GeneratedNorTargetAlias{"m36l0r", 2u},
+    GeneratedNorTargetAlias{"m36l0t", 2u},
+    GeneratedNorTargetAlias{"m6m", 3u},
+    GeneratedNorTargetAlias{"m6", 3u},
+    GeneratedNorTargetAlias{"m6mgd137", 4u},
+    GeneratedNorTargetAlias{"m6mjd137", 4u},
+    GeneratedNorTargetAlias{"d137", 4u},
+    GeneratedNorTargetAlias{"m6mgd137w34d", 4u},
+    GeneratedNorTargetAlias{"mx26l6420mc-90", 5u},
+    GeneratedNorTargetAlias{"mx26l6420", 5u},
+    GeneratedNorTargetAlias{"mx26", 5u},
+    GeneratedNorTargetAlias{"26l6420mc-90", 5u},
 };
 
 inline constexpr std::array<std::size_t, 4> kGeneratedNorDefaultTargetByBackend = {
+    5u,
+    2u,
     4u,
-    1u,
-    3u,
     0u,
 };
 
