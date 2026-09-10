@@ -33,6 +33,32 @@ std::size_t internalStorageBytes(const StorageLayout &layout)
     return total;
 }
 
+std::string saveMemoryCapabilitySummary(std::uint32_t capabilities)
+{
+    struct Entry { std::uint32_t bit; const char *name; };
+    static constexpr Entry entries[] = {
+        {GBASAVE_SAVE_MEMORY_CAP_NONVOLATILE, "NONVOLATILE"},
+        {GBASAVE_SAVE_MEMORY_CAP_BYTE_RW, "BYTE_RW"},
+        {GBASAVE_SAVE_MEMORY_CAP_SRAM_WINDOW, "SRAM_WINDOW"},
+        {GBASAVE_SAVE_MEMORY_CAP_BANKED_WINDOW, "BANKED_WINDOW"},
+        {GBASAVE_SAVE_MEMORY_CAP_DIRECT_SRAM_GAMEPLAY, "DIRECT_SRAM"},
+        {GBASAVE_SAVE_MEMORY_CAP_EEPROM_TO_RAM, "EEPROM_TO_RAM"},
+        {GBASAVE_SAVE_MEMORY_CAP_FLASH512_TO_RAM, "FLASH512_TO_RAM"},
+        {GBASAVE_SAVE_MEMORY_CAP_FLASH1M_TO_BANKED_RAM, "FLASH1M_TO_BANKED_RAM"},
+    };
+    std::ostringstream out;
+    bool first = true;
+    for (const auto &entry : entries) {
+        if ((capabilities & entry.bit) == 0u)
+            continue;
+        if (!first)
+            out << ", ";
+        out << entry.name;
+        first = false;
+    }
+    return first ? std::string("NONE") : out.str();
+}
+
 } // namespace
 
 std::string formatPatchReport(
@@ -58,18 +84,27 @@ std::string formatPatchReport(
     out << "TARGET CART/NOR PROFILE: " << targetDisplay << " (" << targetKey << ")\n";
     out << "IMPORTANT: backend-specific patched ROMs are NOT interchangeable.\n";
     out << "============================================================\n";
+    out << "Patch strategy:  " << toString(patchReport.strategy) << "\n";
     out << "NOR backend:     " << nor.protocolDescription << "\n";
     out << "NOR program cmd: " << hex(nor.wordProgramCommand, 2) << "\n";
     if (nor.supportsBlockErase)
         out << "NOR erase unit:  " << nor.eraseBlockBytes << " bytes (erase-capable paths only)\n";
     else
         out << "NOR erase unit:  NONE (program-only runtime; chip erase is forbidden)\n";
-    out << "Hole database: "
-        << (patchReport.gbabrDatabaseMatched
-                ? "GBABR_v" + std::to_string(patchReport.gbabrDatabaseVersion) + " MATCH (" +
-                    std::to_string(patchReport.gbabrErasedHoleCount) + " verified erased regions)"
-                : "GBABR_v" + std::to_string(patchReport.gbabrDatabaseVersion) + " NO_MATCH -> APPEND_ONLY")
-        << "\n";
+    bool usesTrailingFf = patchReport.runtimeHoleSource == HoleDiscoverySource::TrailingFfPadding;
+    for (const auto &block : patchReport.storage.blocks)
+        usesTrailingFf = usesTrailingFf || block.holeSource == HoleDiscoverySource::TrailingFfPadding;
+    for (const auto &span : patchReport.storage.programOnlySpans)
+        usesTrailingFf = usesTrailingFf || span.holeSource == HoleDiscoverySource::TrailingFfPadding;
+    out << "Placement proof: ";
+    if (patchReport.gbabrDatabaseMatched)
+        out << "GBABR_v" << patchReport.gbabrDatabaseVersion << " MATCH ("
+            << patchReport.gbabrErasedHoleCount << " verified erased regions)";
+    else if (usesTrailingFf)
+        out << "STRUCTURAL_TRAILING_FF (no ROM identity/database match required)";
+    else
+        out << "APPENDED_WITHIN_TARGET_CAPACITY";
+    out << "\n";
     if (patchReport.forcedFlashId != 0u)
         out << "Forced ID:     " << hex(patchReport.forcedFlashId, 4) << "\n";
 
@@ -177,13 +212,92 @@ std::string formatPatchReport(
         break;
     case SaveType::Flash512:
     case SaveType::Flash1M:
-        out << "FLASH uses commit-last append-only versioned NOR slots and spill blocks; current runtime does not recycle them with sector erase.";
+        if (patchReport.strategy == PatchStrategy::AnalyzedDirectRww ||
+            patchReport.strategy == PatchStrategy::ExactDirectRww)
+            out << "FLASH uses the target-qualified compact direct-RWW save engine; executable payload and mutable journal storage are kept in RWW-compatible regions.";
+        else
+            out << "FLASH uses commit-last append-only versioned NOR slots and spill blocks; current runtime does not recycle them with sector erase.";
         break;
     default:
         out << "backend writes are commit-last and capability/geometry constrained.";
         break;
     }
     out << "\n";
+    return out.str();
+}
+
+std::string formatSaveMemoryPatchReport(
+    const std::string &version,
+    const std::string &inputHash,
+    const std::string &outputHash,
+    const SaveMemoryPatchResult &result,
+    const GbasaveSaveMemoryProfileDescriptor &profile,
+    std::size_t romCapacityBytes)
+{
+    const auto &target = profile.target;
+    const auto &plan = result.patchPlan;
+    std::ostringstream out;
+
+    out << "GBASaveHandler " << version << " patch complete\n";
+    out << "Input SHA256:  " << inputHash << "\n";
+    out << "Output SHA256: " << outputHash << "\n";
+    out << "Save analysis: " << (result.savePlan.source_db ? "EXACT_SHARED_PLAN" : "STRUCTURAL/SIGNATURE") << "\n";
+    out << "Save type:     " << sfw_save_type_name(result.savePlan.save_type)
+        << " / " << plan.logical_save_bytes << " bytes\n";
+    out << "Save API ops:  " << static_cast<unsigned>(result.savePlan.op_count);
+    if (result.savePlan.irq_count != 0u)
+        out << " + " << static_cast<unsigned>(result.savePlan.irq_count) << " IRQ hook(s)";
+    out << "\n";
+
+    out << "\n============================================================\n";
+    out << "TARGET SAVE-MEMORY PROFILE: " << profile.display_name << " (" << profile.key << ")\n";
+    out << "Technology:    " << gbasave_save_memory_technology_name(target.technology) << "\n";
+    out << "Qualification: " << profile.qualification_state << "\n";
+    out << "Capabilities:  " << saveMemoryCapabilitySummary(target.capabilities) << "\n";
+    out << "Backing size:  " << target.total_bytes << " bytes\n";
+    out << "GBA window:    " << target.window_bytes << " bytes @ " << hex(target.gba_window_base, 8) << "\n";
+    out << "Banks:         " << static_cast<unsigned>(target.bank_count) << "\n";
+    if (target.bank_count > 1u) {
+        out << "Bank selector: " << hex(target.selector_gba_address, 8)
+            << " mask=" << hex(target.selector_mask, 4)
+            << " shift=" << static_cast<unsigned>(target.selector_shift)
+            << " width=" << static_cast<unsigned>(target.selector_write_width) << " bits\n";
+    }
+    out << "============================================================\n";
+
+    out << "Patch strategy: NORMALIZED_SAVE_API -> TARGET_CAPABILITY_ROUTE\n";
+    out << "Route:          " << gbasave_save_memory_route_name(plan.route) << "\n";
+    if (plan.payload_bytes != 0u) {
+        const bool internal = plan.payload_base < result.originalRomBytes;
+        out << "Runtime:        " << hex(plan.payload_base, 6) << ".."
+            << hex(plan.payload_base + plan.payload_bytes - 1u, 6)
+            << " (" << plan.payload_bytes << " bytes; "
+            << (internal ? "VERIFIED_TRAILING_FF" : "APPENDED") << ")\n";
+    } else {
+        out << "Runtime:        INLINE/API STUBS ONLY; no appended runtime payload\n";
+    }
+
+    const std::size_t growth = result.outputRomBytes > result.originalRomBytes
+        ? result.outputRomBytes - result.originalRomBytes : 0u;
+    out << "\nSize/layout summary:\n";
+    out << "  Original ROM: " << result.originalRomBytes << " bytes (" << hex(result.originalRomBytes, 6) << ")\n";
+    out << "  Output ROM:   " << result.outputRomBytes << " bytes (" << hex(result.outputRomBytes, 6) << ")\n";
+    out << "  Output growth:" << " " << growth << " bytes\n";
+    out << "  ROM capacity: " << romCapacityBytes << " bytes (" << hex(romCapacityBytes, 6) << ")\n";
+
+    out << "\nSafety model: game save calls are redirected through the normalized save API; "
+        << "the selected profile supplies the backing-memory semantics. ";
+    if (plan.route == GBASAVE_SAVE_MEMORY_ROUTE_FLASH1M_BANKED)
+        out << "FLASH1M bank changes are virtualized through the declared bank selector; original FLASH command sequences are bypassed.";
+    else if (plan.route == GBASAVE_SAVE_MEMORY_ROUTE_FLASH512)
+        out << "FLASH512 command sequences are replaced with direct byte-addressable save-window accesses.";
+    else if (plan.route == GBASAVE_SAVE_MEMORY_ROUTE_EEPROM)
+        out << "EEPROM transfers are translated to byte-addressable save-window accesses.";
+    else if (plan.route == GBASAVE_SAVE_MEMORY_ROUTE_DIRECT_SRAM)
+        out << "The game uses the target SRAM window directly.";
+    out << "\n";
+    if (profile.qualification_note && *profile.qualification_note)
+        out << "Target note:    " << profile.qualification_note << "\n";
     return out.str();
 }
 

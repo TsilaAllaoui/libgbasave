@@ -39,7 +39,7 @@ def main():
         assert match
         off = int(match.group(1), 16)
         assert match.group(3) == 'APPENDED_TAIL'
-        assert 'GBABR_v6 NO_MATCH -> APPEND_ONLY' in text
+        assert 'Placement proof: APPENDED_WITHIN_TARGET_CAPACITY' in text
 
         patched = out.read_bytes()
         assert off >= len(original), 'database-miss runtime must append, never authorize raw FF/00 caves'
@@ -58,7 +58,8 @@ def main():
             assert after == ((before + delta) & 0xffffffff), (
                 hex(relocation), hex(before), hex(after), hex(delta))
 
-        assert 'block 0 -> 0x110000..0x11FFFF APPENDED_TAIL' in text
+        storage0 = re.search(r'block 0 -> 0x([0-9A-F]+)\.\.0x([0-9A-F]+) APPENDED_TAIL', text)
+        assert storage0 and int(storage0.group(1), 16) >= len(original)
         print(f'PASS runtime relocation: {len(relocs)} ABS32 literals shifted by {delta:#x}')
         print('PASS database-miss FF cave is not trusted; runtime/storage append while relocations remain correct')
 

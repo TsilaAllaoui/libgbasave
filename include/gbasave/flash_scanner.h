@@ -14,7 +14,13 @@ struct FunctionInfo {
     FlashRoutineRole role{};
     std::string name;
     std::size_t offset{};
+    // Conservative contiguous bytes available from the entry for a replacement
+    // stub. This may stop at the first return path and is intentionally not the
+    // same thing as the whole routine body.
     std::size_t size{};
+    // Conservative span covering all locally reachable basic blocks. Used for
+    // ownership/safety proofs only; never as overwrite capacity.
+    std::size_t bodySize{};
     std::vector<std::uint8_t> signature;
     std::string evidence;
     std::vector<std::size_t> directCallsites;
@@ -22,6 +28,7 @@ struct FunctionInfo {
 
 struct SetupProfile {
     std::size_t offset{};
+    std::uint32_t programFlashByte{};
     std::uint32_t programFlashSector{};
     std::uint32_t eraseFlashChip{};
     std::uint32_t eraseFlashSector{};
@@ -35,17 +42,25 @@ struct SetupProfile {
     std::string chipName;
 };
 
+enum class FlashSetupDiscoverySource {
+    MarkerPointerTable,
+    GlobalStructuralScan,
+};
+
 struct FlashMap {
     const FlashLibraryProfile *libraryProfile{};
     std::string detectedMarker;
     std::size_t markerOffset{};
-    std::size_t setupTableOffset{};
+    std::size_t setupTableOffset{static_cast<std::size_t>(-1)};
+    FlashSetupDiscoverySource setupDiscoverySource{FlashSetupDiscoverySource::MarkerPointerTable};
     std::vector<SetupProfile> setupProfiles;
     std::vector<FunctionInfo> functions;
     bool allSignaturesUnique{};
 
     const FunctionInfo &function(FlashRoutineRole role) const;
 };
+
+std::string toString(FlashSetupDiscoverySource source);
 
 class FlashScanner {
 public:

@@ -1,5 +1,6 @@
 #include "gbasave/streaming/save_memory.h"
 #include "save_memory_assets.h"
+#include "internal/save_memory_stub_abi.h"
 
 namespace {
 using namespace gbasave::save_memory_assets;
@@ -7,36 +8,7 @@ using namespace gbasave::save_memory_assets;
 constexpr uint32_t kGbaRomBase = 0x08000000u;
 constexpr uint32_t kMinimumMapperWindow = 0x00080000u;
 
-// sfw_save_stubs.bin ABI frozen from the hardware-proven GBABR runtime.
-constexpr uint32_t kEepromReadOff=0x00u, kEepromReadLen=0x20u;
-constexpr uint32_t kEepromWriteOff=0x20u, kEepromWriteLen=0x20u;
-constexpr uint32_t kFlashReadOff=0x40u, kFlashReadLen=0x20u, kFlashReadDispatch=0x1Cu;
-constexpr uint32_t kFlashEraseChipOff=0x60u, kFlashEraseChipLen=0x18u, kFlashEraseChipDispatch=0x14u;
-constexpr uint32_t kFlashEraseSectorOff=0x78u, kFlashEraseSectorLen=0x1Cu, kFlashEraseSectorDispatch=0x18u;
-constexpr uint32_t kFlashWriteSectorOff=0x94u, kFlashWriteSectorLen=0x20u, kFlashWriteSectorDispatch=0x1Cu;
-constexpr uint32_t kFlashWriteByteOff=0xB4u, kFlashWriteByteLen=0x1Cu, kFlashWriteByteDispatch=0x18u;
-constexpr uint32_t kFlashIdent512Off=0xD0u, kFlashIdent512Len=0x08u;
-constexpr uint32_t kFlashIdent1MOff=0xD8u, kFlashIdent1MLen=0x08u;
-constexpr uint32_t kThumbRet0Off=0xE0u, kThumbRet0Len=0x04u;
-
-// fram_flash512_inline.bin ABI.
-constexpr uint32_t kF512ReadOff=0x00u, kF512ReadLen=0x20u, kF512ReadWindow=0x1Cu;
-constexpr uint32_t kF512EraseChipOff=0x20u, kF512EraseChipLen=0x1Cu, kF512EraseChipWindow=0x18u;
-constexpr uint32_t kF512EraseSectorOff=0x3Cu, kF512EraseSectorLen=0x24u, kF512EraseSectorWindow=0x20u;
-constexpr uint32_t kF512WriteSectorOff=0x60u, kF512WriteSectorLen=0x2Cu, kF512WriteSectorWindow=0x28u;
-constexpr uint32_t kF512WriteByteOff=0x8Cu, kF512WriteByteLen=0x14u, kF512WriteByteWindow=0x10u;
-
-// fram_banked_runtime.bin ABI.
-constexpr uint32_t kFramDispatchOff=0x30u;
-constexpr uint32_t kFramCfgWindow=0x0Cu;
-constexpr uint32_t kFramCfgSelector=0x10u;
-constexpr uint32_t kFramCfgSelectorMask=0x14u;
-constexpr uint32_t kFramCfgSelectorShift=0x18u;
-constexpr uint32_t kFramCfgSelectorFixed=0x1Cu;
-constexpr uint32_t kFramCfgSelectorWidth=0x20u;
-constexpr uint32_t kFramCfgSectorCount=0x24u;
-constexpr uint32_t kFramCfgWindowBytes=0x28u;
-constexpr uint32_t kFramCfgBankCount=0x2Cu;
+using namespace gbasave::save_memory_stub_abi;
 
 static_assert(kEmbeddedSfwSaveStubsSize == 0xE4u, "unexpected save stub ABI");
 static_assert(kEmbeddedFramFlash512InlineSize == 0xA0u, "unexpected FLASH512 FRAM ABI");

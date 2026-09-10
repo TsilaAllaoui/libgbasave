@@ -36,8 +36,8 @@ def blocks(text: str):
             for a, b, src in re.findall(r'block \d+ -> 0x([0-9A-F]+)\.\.0x([0-9A-F]+) (\S+)', text)]
 
 
-def assert_fresh_block(out: bytes, start: int, kind: str):
-    anchor = start + 0x10000 - (8 if kind == 'eeprom' else 4)
+def assert_fresh_block(out: bytes, start: int, kind: str, block_bytes: int = 0x10000):
+    anchor = start + block_bytes - (8 if kind == 'eeprom' else 4)
     assert out[start:anchor] == b'\xff' * (anchor - start)
     assert out[anchor:anchor + 2] == b'\xAA\xAA'
 
@@ -109,13 +109,19 @@ def main():
         source = flash512_fixture(marker)
         out, text = run_patch(source, 'flash512')
         bs = blocks(text)
-        assert 'FLASH versions/block:  15' in text
+        # CompactV2 uses program-only arenas sized from the 4 KiB logical
+        # FLASH sector rather than the NOR erase geometry.  Require at least
+        # three power-loss-safe generations without coupling the test to a
+        # particular cartridge erase-unit size.
+        versions = re.search(r'FLASH versions/block:\s+(\d+)', text)
+        assert versions and int(versions.group(1)) >= 3
         assert 'FLASH spill blocks:    8' in text
         assert 'NOR wear policy:' in text
         assert len(bs) == 24
         for a, b, _ in bs:
-            assert b - a + 1 == 0x10000
-            assert_fresh_block(out, a, 'flash')
+            assert b - a + 1 >= 3 * 0x1000 + 0x100
+            assert (b - a + 1) & (b - a) == 0, 'compact program arena must be power-of-two sized'
+            assert_fresh_block(out, a, 'flash', b - a + 1)
         # All six validated physical primitives were redirected.
         assert 'Patched routines: 6' in text
 

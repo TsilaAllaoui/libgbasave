@@ -223,8 +223,11 @@ extern "C" int gbasave_nor_patch_plan_build(
             return GBASAVE_NOR_PATCH_INVALID;
     } else {
         for (uint32_t i=0u;i<6u;++i) write32(payloadOut + kFlashCompactConfigBlock0 + i*4u, layout->storage[i]);
-        /* Frozen compact RWW ABI reserves 32 logical journal sectors. */
-        write32(payloadOut + kFlashCompactConfigSectorCount, 32u);
+        // FLASH512 exposes 16 logical 4 KiB sectors; FLASH1M exposes 32.
+        // The compact runtime supports both through the same generated asset.
+        const uint32_t logicalSectorCount =
+            romPlan->save_type == SFW_SAVE_FLASH512K ? 16u : 32u;
+        write32(payloadOut + kFlashCompactConfigSectorCount, logicalSectorCount);
         write32(payloadOut + kFlashCompactConfigLayoutMagic, static_cast<uint32_t>(kFlashCompactLayoutMagicValue));
     }
     return GBASAVE_NOR_PATCH_READY;

@@ -15,19 +15,10 @@ std::vector<SaveMarkerMatch> findVersionedMarkers(const RomImage &rom, const std
 {
     std::vector<SaveMarkerMatch> matches;
     for (const auto offset : rom.findAscii(prefix)) {
-        // Require identifier/token boundaries and a NUL terminator. This keeps
-        // marker discovery protocol-oriented and prevents substrings in unrelated
-        // text from becoming save-library evidence.
-        if (offset != 0u) {
-            const std::uint8_t previous = rom.bytes()[offset - 1u];
-            const bool identifierChar =
-                (previous >= static_cast<std::uint8_t>('A') && previous <= static_cast<std::uint8_t>('Z')) ||
-                (previous >= static_cast<std::uint8_t>('a') && previous <= static_cast<std::uint8_t>('z')) ||
-                (previous >= static_cast<std::uint8_t>('0') && previous <= static_cast<std::uint8_t>('9')) ||
-                previous == static_cast<std::uint8_t>('_');
-            if (identifierChar)
-                continue;
-        }
+        // A GBA ROM is binary, not a tokenized text file. The byte immediately
+        // before an SDK marker may be an instruction/data byte that happens to be
+        // ASCII, so it is not valid negative evidence. The version digits and NUL
+        // terminator below are the marker boundary proof.
         const std::size_t versionOffset = offset + prefix.size();
         if (versionOffset + 3u > rom.size())
             continue;

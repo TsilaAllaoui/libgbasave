@@ -17,6 +17,14 @@ enum class StoragePolicy {
     CompactV2,
 };
 
+enum class PatchStrategy {
+    SharedPrimitiveRuntime,
+    ExactDirectRww,
+    AnalyzedDirectRww,
+};
+
+const char *toString(PatchStrategy strategy);
+
 struct PatchOptions {
     // Effective physical capacity for this patch invocation. CLI target profiles
     // set this explicitly; programmatic callers default to the GBA 32 MiB ceiling.
@@ -46,6 +54,7 @@ struct PatchedRoutine {
 
 struct PatchReport {
     SaveType saveType{SaveType::Unknown};
+    PatchStrategy strategy{PatchStrategy::SharedPrimitiveRuntime};
     StorageLayout storage;
     std::size_t runtimeOffset{};
     std::size_t runtimeSize{};

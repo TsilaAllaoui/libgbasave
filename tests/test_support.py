@@ -9,7 +9,20 @@ from pathlib import Path
 import os
 
 LIB_ROOT = Path(__file__).resolve().parents[1]
-WORKSPACE_ROOT = LIB_ROOT.parent
+
+
+def _workspace_root() -> Path:
+    # Support both the historical sibling-repository layout and the current
+    # GBASaveHandler/externals/libgbasave embedding without symlink tricks.
+    # The workspace root is the directory that contains GBASaveHandler/.
+    for ancestor in LIB_ROOT.parents:
+        candidate = ancestor / "GBASaveHandler" / "src" / "main.cpp"
+        if candidate.exists():
+            return ancestor
+    return LIB_ROOT.parent
+
+
+WORKSPACE_ROOT = _workspace_root()
 
 
 def _default_handler_binary() -> Path:

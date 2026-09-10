@@ -1,7 +1,10 @@
 #include "gbasave/engine.h"
 
 #include "gbasave/flash_scanner.h"
+#include "gbasave/save_memory_patcher.h"
 #include "gbasave/sha256.h"
+
+#include <stdexcept>
 
 namespace gbasave {
 namespace {
@@ -12,7 +15,8 @@ std::string holeSummary(const RomHoleCatalog &holes)
         return "GBABR_v" + std::to_string(holes.gbabrDatabaseVersion) + " MATCH (" +
             std::to_string(holes.databaseErasedHoles.size()) + " verified erased regions)";
     }
-    return "GBABR_v" + std::to_string(holes.gbabrDatabaseVersion) + " NO_MATCH -> APPEND_ONLY";
+    return "GBABR_v" + std::to_string(holes.gbabrDatabaseVersion) +
+        " NO_MATCH -> VERIFIED_TRAILING_FF_OR_APPEND";
 }
 
 } // namespace
@@ -34,8 +38,25 @@ AnalysisResult SaveEngine::analyze(const RomImage &rom, SaveType requestedSaveTy
     result.textReport += "Hole database: " + holeSummary(result.holeCatalog) + "\n";
 
     if (result.saveLibrary.type == SaveType::Flash1M && result.saveLibrary.primitiveHooks.empty()) {
-        const auto flashMap = FlashScanner{}.scan(rom);
-        result.textReport += "\n" + FlashScanner::toText(rom, flashMap, result.inputSha256);
+        try {
+            const auto flashMap = FlashScanner{}.scan(rom);
+            result.textReport += "\n" + FlashScanner::toText(rom, flashMap, result.inputSha256);
+        } catch (const std::runtime_error &primitiveError) {
+            // A rebuilt ROM may make low-level primitive ownership ambiguous
+            // while still exposing a complete, signature/structure-proven
+            // public FLASH API.  Keep analysis useful and let target routing
+            // choose whether that normalized plan is sufficient.
+            try {
+                const auto publicPlan = SaveMemoryPatcher{}.analyze(rom);
+                if (publicPlan.save_type != SFW_SAVE_FLASH1024K)
+                    throw;
+                result.textReport +=
+                    "\nFLASH primitive map: not unique (" + std::string(primitiveError.what()) + ")\n"
+                    "Normalized public FLASH API: COMPLETE; direct/public-ABI-capable targets may use it.\n";
+            } catch (...) {
+                throw std::runtime_error(primitiveError.what());
+            }
+        }
     } else if (result.saveLibrary.type == SaveType::Flash1M) {
         result.textReport += "\nExact-plan multi-library FLASH1M: all validated primitive copies will be bridged.\n";
     }

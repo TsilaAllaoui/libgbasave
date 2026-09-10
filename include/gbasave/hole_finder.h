@@ -19,6 +19,7 @@ struct ByteRange {
 enum class HoleDiscoverySource {
     None,
     GbabrDatabase,
+    TrailingFfPadding,
 };
 
 struct GbabrRegion {
@@ -32,11 +33,13 @@ struct GbabrRegion {
     bool containsAlignedEraseBlock(std::size_t blockBytes) const;
 };
 
-// Shared GBABR metadata is the only authority for in-ROM replacement/storage.
-// Runtime caves may be structurally safe 00 or FF regions. Persistent erase
-// storage is stricter and consumes only SAFE_CODE+FF ranges that contain a
-// complete backend erase unit. Database misses append instead of running an
-// independent byte-pattern safety oracle, so no fallback can bypass GBABR.
+// Exact GBABR metadata remains the preferred authority for arbitrary internal
+// replacement/storage regions.  A contiguous FF run that reaches the source
+// image end is also a generic structural fact and may be consumed safely: no
+// later ROM bytes can be hidden behind it.  Persistent NOR storage remains
+// stricter and must additionally satisfy backend erase/alignment rules.
+// Arbitrary internal FF/00 runs are never trusted on a database miss because
+// they may be referenced game data.
 struct RomHoleCatalog {
     std::uint32_t gbabrDatabaseVersion{};
     bool gbabrDatabaseMatched{};
@@ -45,6 +48,10 @@ struct RomHoleCatalog {
     std::vector<GbabrRegion> databaseRegions;
     std::vector<ByteRange> databaseRuntimeHoles;
     std::vector<ByteRange> databaseErasedHoles;
+    // Contiguous erased bytes reaching the physical end of the source image.
+    // Unlike an arbitrary internal FF run this is a structural placement fact:
+    // consuming it cannot overwrite later ROM content.
+    ByteRange trailingFfPadding{};
 };
 
 RomHoleCatalog discoverRomHoles(const RomImage &rom);

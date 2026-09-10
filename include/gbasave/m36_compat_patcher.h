@@ -11,4 +11,12 @@ PatchReport patchM36HardwareProvenRoute(
     const SaveLibraryMatch &saveLibrary,
     const PatchOptions &options);
 
+// Generic compact-RWW route for structurally analyzed FLASH libraries.
+// Unlike patchM36HardwareProvenRoute(), this path has no ROM identity lookup:
+// it consumes the normalized SfwSavePlan emitted by libgbasave's analyzers.
+PatchReport patchM36AnalyzedFlashRoute(
+    RomImage &rom,
+    const SaveLibraryMatch &saveLibrary,
+    const PatchOptions &options);
+
 } // namespace gbasave

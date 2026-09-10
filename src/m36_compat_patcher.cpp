@@ -3,6 +3,10 @@
 #include "gbasave/hole_finder.h"
 #include "gbasave/nor_backends.h"
 #include "gbasave/storage_layout.h"
+#include "gbasave/streaming/nor_patch.h"
+#include "gbasave/streaming/nor_layout.h"
+#include "gbasave/streaming/exact_plan.h"
+#include "gbasave/save_memory_patcher.h"
 #include "gbabr_plan_db.h"
 #include "m36_assets.h"
 
@@ -218,6 +222,83 @@ StorageLayout reportLayout(const M36Layout &m, StorageLayoutKind kind) {
     return l;
 }
 
+std::uint8_t sfwTypeForM36SaveType(SaveType type)
+{
+    switch (type) {
+    case SaveType::Flash512: return SFW_SAVE_FLASH512K;
+    case SaveType::Flash1M: return SFW_SAVE_FLASH1024K;
+    default: return SFW_SAVE_NONE;
+    }
+}
+
+GbasaveExactRomPlan makeAnalyzedRomPlan(
+    const RomImage &rom,
+    const SfwSavePlan &savePlan,
+    const RomHoleCatalog &holes,
+    std::size_t mutableMainArrayEnd)
+{
+    if (rom.size() > 0xFFFFFFFFu)
+        throw std::runtime_error("M36 analyzed route requires a <=4 GiB ROM image");
+
+    GbasaveExactRomPlan plan{};
+    plan.rom_size = static_cast<std::uint32_t>(rom.size());
+    plan.entry_word = rom.u32(0u);
+    plan.save_type = savePlan.save_type;
+    plan.source_kind = GBASAVE_ROM_PLAN_SOURCE_STATIC;
+    plan.ready = 1u;
+    plan.save_plan = savePlan;
+    plan.save_plan.filesize = plan.rom_size;
+    plan.save_plan.source_db = 0u;
+
+    // Only expose a structurally proven end-of-image FF run.  It is clipped to
+    // the M36 mutable main array so neither payload nor save journals can be
+    // allocated in the parameter-sector reservation at the top of the chip.
+    const auto &tail = holes.trailingFfPadding;
+    if (tail.size != 0u && tail.offset < mutableMainArrayEnd) {
+        const std::size_t end = std::min(tail.end(), mutableMainArrayEnd);
+        if (end > tail.offset && tail.offset <= 0xFFFFFFFFu && end - tail.offset <= 0xFFFFFFFFu) {
+            auto &region = plan.region[0];
+            region.start = static_cast<std::uint32_t>(tail.offset);
+            region.size = static_cast<std::uint32_t>(end - tail.offset);
+            region.fill = 0xFFu;
+            region.flags = GBASAVE_ROM_REGION_TAIL |
+                           GBASAVE_ROM_REGION_SAFE_CODE |
+                           GBASAVE_ROM_REGION_POINTER_FREE |
+                           GBASAVE_ROM_REGION_FF;
+            region.alignment_log2 = 1u;
+            region.source = GBASAVE_ROM_PLAN_SOURCE_STATIC;
+            plan.region_count = 1u;
+            plan.tail_start = region.start;
+            plan.tail_bytes = region.size;
+        }
+    }
+    return plan;
+}
+
+StorageLayout storageLayoutFromGenericM36(
+    const GbasaveNorSaveLayout &layout,
+    std::size_t originalSize,
+    std::size_t outputSize,
+    std::size_t capacity)
+{
+    StorageLayout result;
+    result.kind = StorageLayoutKind::FlashVersionedSlots;
+    result.romAddressSpaceBytes = capacity;
+    result.physicalEraseBlockBytes = layout.storage_block_bytes;
+    result.outputSizeBytes = outputSize;
+    for (std::size_t i = 0u; i < layout.storage_count; ++i) {
+        const std::size_t offset = layout.storage[i];
+        const bool internal = offset < originalSize;
+        result.blocks.push_back({
+            i,
+            offset,
+            layout.storage_block_bytes,
+            internal ? StoragePlacementSource::InternalFfHole : StoragePlacementSource::AppendedTail,
+            internal ? HoleDiscoverySource::TrailingFfPadding : HoleDiscoverySource::None});
+    }
+    return result;
+}
+
 void applyRawOp(RomImage &rom,const generated_gbabr_plan::Op &o) {
     if(o.kind==10u) { patchStub(rom,o.offset,S_RET0); return; }
     if(o.kind==11u) {
@@ -243,7 +324,7 @@ PatchReport patchM36HardwareProvenRoute(RomImage &rom,const SaveLibraryMatch &sa
     if(!p) throw std::runtime_error("M36 proven route requires exact shared GBABR v6 plan");
     if(p->saveType!=gbabrSaveTypeId(saveLibrary.type)) throw std::runtime_error("M36 shared-plan save type disagrees with validated library scan");
     const auto holes=discoverRomHoles(original);
-    PatchReport report; report.saveType=saveLibrary.type; report.gbabrDatabaseMatched=holes.gbabrDatabaseMatched; report.gbabrDatabaseVersion=holes.gbabrDatabaseVersion; report.gbabrErasedHoleCount=holes.databaseErasedHoles.size();
+    PatchReport report; report.saveType=saveLibrary.type; report.strategy=PatchStrategy::ExactDirectRww; report.gbabrDatabaseMatched=holes.gbabrDatabaseMatched; report.gbabrDatabaseVersion=holes.gbabrDatabaseVersion; report.gbabrErasedHoleCount=holes.databaseErasedHoles.size();
     const auto originalEntry=decodeArmBranchTarget(original.u32(0u));
 
     if(saveLibrary.type==SaveType::Sram) {
@@ -279,6 +360,128 @@ PatchReport patchM36HardwareProvenRoute(RomImage &rom,const SaveLibraryMatch &sa
     // EEPROM geometries use the shared record-lane runtime selected by the
     // caller. This asset path is intentionally limited to SRAM and FLASH.
     throw std::runtime_error("M36 compact asset route is only valid for SRAM/FLASH protocols");
+}
+
+PatchReport patchM36AnalyzedFlashRoute(
+    RomImage &rom,
+    const SaveLibraryMatch &saveLibrary,
+    const PatchOptions &options)
+{
+    if (!options.storagePreserveImage.empty())
+        throw std::runtime_error(
+            "generic M36 analyzed route does not yet support --preserve-storage-from; "
+            "the ROM was not modified");
+    if (saveLibrary.type != SaveType::Flash512 && saveLibrary.type != SaveType::Flash1M)
+        throw std::runtime_error("generic M36 compact route currently accepts FLASH512/FLASH1M only");
+
+    const RomImage original = rom;
+    const auto &caps = directBackend();
+    const std::size_t physicalCapacity = std::min(options.romAddressSpaceBytes, caps.romAddressSpaceLimit);
+    if (original.size() > physicalCapacity) {
+        throw std::runtime_error(
+            "target capacity is too small: source ROM is " + std::to_string(original.size()) +
+            " bytes, while target '" +
+            (options.targetProfileKey.empty() ? std::string(caps.profileKey) : options.targetProfileKey) +
+            "' can address only " + std::to_string(physicalCapacity) +
+            " bytes. This is a physical target-size limit; choose a larger target/profile.");
+    }
+
+    const SfwSavePlan savePlan = SaveMemoryPatcher{}.analyze(original);
+    const std::uint8_t expectedSaveType = sfwTypeForM36SaveType(saveLibrary.type);
+    if (savePlan.save_type != expectedSaveType) {
+        throw std::runtime_error(
+            "analyzer disagreement: save-library scan reports " + toString(saveLibrary.type) +
+            ", but normalized semantic save plan reports '" +
+            std::string(sfw_save_type_name(savePlan.save_type)) + "'. The ROM was not modified.");
+    }
+
+    const RomHoleCatalog holes = discoverRomHoles(original);
+    GbasaveExactRomPlan normalized = makeAnalyzedRomPlan(
+        original, savePlan, holes, caps.mutableMainArrayEnd);
+
+    GbasaveNorSaveTarget target{};
+    // For ordinary smaller images, prevent appended runtime/storage from
+    // entering M36 parameter sectors. A physically full 16 MiB source is
+    // allowed as input, but then the planner can succeed only from the clipped
+    // internal trailing-FF region above.
+    target.capacity_bytes = static_cast<std::uint32_t>(
+        original.size() <= caps.mutableMainArrayEnd
+            ? std::min(physicalCapacity, caps.mutableMainArrayEnd)
+            : physicalCapacity);
+    target.erase_block_bytes = static_cast<std::uint32_t>(caps.eraseBlockBytes);
+    target.rww_bank_bytes = static_cast<std::uint32_t>(caps.runtimeExecutionBankBytes);
+
+    GbasaveNorSaveLayout layout{};
+    const int layoutResult = gbasave_nor_save_layout_resolve(&normalized, &target, &layout);
+    if (layoutResult != GBASAVE_NOR_SAVE_LAYOUT_READY) {
+        const std::size_t usableTail = holes.trailingFfPadding.offset < caps.mutableMainArrayEnd
+            ? std::min(holes.trailingFfPadding.end(), caps.mutableMainArrayEnd) - holes.trailingFfPadding.offset
+            : 0u;
+        throw std::runtime_error(
+            "M36 compact save layout could not be proven. The analyzed FLASH API is usable, but the "
+            "target needs an executable payload (up to 8192 bytes) plus six 128 KiB journal blocks, "
+            "with mutable save blocks outside the payload's 1 MiB RWW bank. Structurally usable "
+            "trailing-FF space below the M36 parameter-sector boundary: " +
+            std::to_string(usableTail) + " bytes. No unsafe internal hole was guessed; the ROM was not modified.");
+    }
+
+    std::array<std::uint8_t, GBASAVE_NOR_PATCH_MAX_PAYLOAD_BYTES> payload{};
+    GbasaveNorPatchPlan patch{};
+    const int patchResult = gbasave_nor_patch_plan_build(
+        &normalized, &layout, 0x00F9u, payload.data(),
+        static_cast<std::uint32_t>(payload.size()), &patch);
+    if (patchResult != GBASAVE_NOR_PATCH_READY)
+        throw std::runtime_error(
+            "M36 compact patch composer rejected the normalized analyzer plan; "
+            "save routine ABI or reset-entry requirements are not satisfied. The ROM was not modified.");
+
+    std::size_t outputSize = original.size();
+    outputSize = std::max(outputSize, static_cast<std::size_t>(patch.payload_offset) + patch.payload_bytes);
+    for (std::size_t i = 0u; i < patch.storage_count; ++i)
+        outputSize = std::max(outputSize, static_cast<std::size_t>(patch.storage[i]) + patch.storage_block_bytes);
+    if (outputSize > physicalCapacity || outputSize > caps.romAddressSpaceLimit)
+        throw std::runtime_error("M36 analyzed patch unexpectedly exceeds target capacity");
+
+    rom.resize(outputSize, 0xFFu);
+    constexpr std::uint32_t kChunkBytes = 64u * 1024u;
+    auto &bytes = rom.bytes();
+    for (std::uint32_t offset = 0u; offset < bytes.size(); offset += kChunkBytes) {
+        const std::uint32_t chunk = static_cast<std::uint32_t>(
+            std::min<std::size_t>(kChunkBytes, bytes.size() - offset));
+        if (!gbasave_nor_patch_apply_overlay(
+                &normalized, &patch, payload.data(), offset, bytes.data() + offset, chunk))
+            throw std::runtime_error("M36 compact overlay failed bounds/safety validation; the ROM was not modified");
+    }
+
+    PatchReport report;
+    report.saveType = saveLibrary.type;
+    report.strategy = PatchStrategy::AnalyzedDirectRww;
+    report.gbabrDatabaseVersion = holes.gbabrDatabaseVersion;
+    report.gbabrDatabaseMatched = holes.gbabrDatabaseMatched;
+    report.gbabrErasedHoleCount = holes.databaseErasedHoles.size();
+    report.runtimeOffset = patch.payload_offset;
+    report.runtimeSize = patch.payload_bytes;
+    report.runtimePlacementSource = patch.payload_offset < original.size()
+        ? RuntimePlacementSource::InternalSafeHole
+        : RuntimePlacementSource::AppendedTail;
+    report.runtimeHoleSource = patch.payload_offset < original.size()
+        ? HoleDiscoverySource::TrailingFfPadding
+        : HoleDiscoverySource::None;
+    report.storage = storageLayoutFromGenericM36(
+        layout, original.size(), outputSize, physicalCapacity);
+    report.flashVersionsPerSector = 0u;
+    report.flashSpillBlockCount = 0u;
+    report.routines.push_back({
+        "M36 compact RWW dispatcher (semantic save plan)",
+        patch.payload_offset,
+        kGbaRomBase + patch.payload_offset + patch.payload_dispatch_offset});
+    for (std::size_t i = 0u; i < savePlan.op_count; ++i) {
+        report.routines.push_back({
+            "Analyzed save API op " + std::to_string(savePlan.op[i].kind),
+            savePlan.op[i].offset,
+            kGbaRomBase + patch.payload_offset + patch.payload_dispatch_offset});
+    }
+    return report;
 }
 
 } // namespace gbasave

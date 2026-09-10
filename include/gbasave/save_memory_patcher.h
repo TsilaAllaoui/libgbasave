@@ -9,11 +9,20 @@
 
 namespace gbasave {
 
+enum class SavePlanAnalysisSource {
+    ExactDatabase,
+    SignatureScan,
+    SemanticFlashStructure,
+};
+
+const char *toString(SavePlanAnalysisSource source);
+
 struct SaveMemoryPatchResult {
     SfwSavePlan savePlan{};
     GbasaveSaveMemoryPatchPlan patchPlan{};
     std::string profileKey;
     std::string profileDisplayName;
+    SavePlanAnalysisSource analysisSource{SavePlanAnalysisSource::SignatureScan};
     std::size_t originalRomBytes{};
     std::size_t outputRomBytes{};
 };

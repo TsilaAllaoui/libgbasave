@@ -5,8 +5,8 @@ import os
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKSPACE = ROOT.parent
-from test_support import GBASAVEHANDLER_BIN as BIN
+from test_support import GBASAVEHANDLER_BIN as BIN, WORKSPACE_ROOT
+WORKSPACE = WORKSPACE_ROOT
 
 
 def main() -> None:

@@ -32,7 +32,8 @@ RuntimePlacement runtimeFromHoles(
     HoleDiscoverySource holeSource,
     std::size_t runtimeBytes,
     std::size_t alignment,
-    std::size_t executionBankBytes)
+    std::size_t executionBankBytes,
+    std::size_t placementLimit)
 {
     struct Candidate {
         std::size_t offset{};
@@ -41,19 +42,22 @@ RuntimePlacement runtimeFromHoles(
 
     std::vector<Candidate> candidates;
     for (const auto &range : ranges) {
+        const std::size_t rangeEnd = std::min(range.end(), placementLimit);
+        if (range.offset >= rangeEnd)
+            continue;
         if (executionBankBytes == 0u) {
             const std::size_t start = alignUp(range.offset, alignment);
-            if (start <= range.end() && runtimeBytes <= range.end() - start)
-                candidates.push_back({start, range.end() - start});
+            if (start <= rangeEnd && runtimeBytes <= rangeEnd - start)
+                candidates.push_back({start, rangeEnd - start});
             continue;
         }
 
         // Some NORs provide bank-local RWW. The complete executable runtime
         // must fit inside one such bank so its worker can mutate another bank.
         std::size_t bankStart = range.offset & ~(executionBankBytes - 1u);
-        while (bankStart < range.end()) {
+        while (bankStart < rangeEnd) {
             const std::size_t segmentStart = std::max(range.offset, bankStart);
-            const std::size_t segmentEnd = std::min(range.end(), bankStart + executionBankBytes);
+            const std::size_t segmentEnd = std::min(rangeEnd, bankStart + executionBankBytes);
             const std::size_t start = alignUp(segmentStart, alignment);
             if (start <= segmentEnd && runtimeBytes <= segmentEnd - start)
                 candidates.push_back({start, segmentEnd - start});
@@ -113,6 +117,42 @@ std::vector<StorageBlockPlacement> blocksFromHoles(
 }
 
 
+std::vector<StorageBlockPlacement> internalFfBlocks(
+    const RomHoleCatalog &holes,
+    std::size_t physicalEraseBlockBytes,
+    const std::vector<ByteRange> &reservedRanges)
+{
+    std::vector<StorageBlockPlacement> result;
+    std::set<std::size_t> seen;
+    const auto append = [&](const std::vector<StorageBlockPlacement> &blocks) {
+        for (const auto &block : blocks) {
+            if (seen.insert(block.offset).second)
+                result.push_back(block);
+        }
+    };
+
+    // Database evidence stays preferred when both describe the same sector.
+    if (holes.gbabrDatabaseMatched) {
+        append(blocksFromHoles(
+            holes.databaseErasedHoles,
+            HoleDiscoverySource::GbabrDatabase,
+            physicalEraseBlockBytes,
+            reservedRanges));
+    }
+    if (holes.trailingFfPadding.size != 0u) {
+        append(blocksFromHoles(
+            {holes.trailingFfPadding},
+            HoleDiscoverySource::TrailingFfPadding,
+            physicalEraseBlockBytes,
+            reservedRanges));
+    }
+    std::sort(result.begin(), result.end(), [](const auto &a, const auto &b) {
+        return a.offset < b.offset;
+    });
+    return result;
+}
+
+
 std::vector<ByteRange> subtractReservedRanges(
     const std::vector<ByteRange> &ranges,
     const std::vector<ByteRange> &reservedRanges)
@@ -153,12 +193,19 @@ std::vector<ByteRange> subtractReservedRanges(
 std::vector<ByteRange> programOnlyFfRanges(const RomHoleCatalog &holes)
 {
     std::vector<ByteRange> ranges;
-    if (!holes.gbabrDatabaseMatched)
-        return ranges;
-    for (const auto &region : holes.databaseRegions) {
-        if (region.programOnlyFfSafe())
-            ranges.push_back(region.range);
+    if (holes.gbabrDatabaseMatched) {
+        for (const auto &region : holes.databaseRegions) {
+            if (region.programOnlyFfSafe())
+                ranges.push_back(region.range);
+        }
     }
+
+    // A contiguous 0xFF run reaching the physical end of the source image is
+    // structural evidence: there are no later ROM bytes that can reference or
+    // depend on it as file content. Treat it as a generic program-only pool.
+    // Callers still subtract target-reserved/runtime ranges before allocation.
+    if (holes.trailingFfPadding.size != 0u)
+        ranges.push_back(holes.trailingFfPadding);
     return ranges;
 }
 
@@ -213,20 +260,36 @@ RuntimePlacement createRuntimePlacement(
     // Every database range is still byte-verified against this ROM.
     if (holes.gbabrDatabaseMatched) {
         const auto placement = runtimeFromHoles(
-            holes.databaseRuntimeHoles, HoleDiscoverySource::GbabrDatabase, runtimeBytes, alignment, executionBankBytes);
+            holes.databaseRuntimeHoles, HoleDiscoverySource::GbabrDatabase, runtimeBytes, alignment, executionBankBytes, romAddressSpaceBytes);
         if (placement.size != 0u)
             return placement;
     }
 
-    // No independent byte-pattern fallback exists here. On a database miss,
-    // append the runtime instead of treating a run of FF/00 as structural proof.
+    // End-of-image FF padding is structurally safe to consume because no later
+    // source bytes exist. This is deliberately narrower than scanning arbitrary
+    // internal FF runs. Target/RWW bounds are still enforced here.
+    if (holes.trailingFfPadding.size != 0u) {
+        const auto placement = runtimeFromHoles(
+            {holes.trailingFfPadding}, HoleDiscoverySource::TrailingFfPadding,
+            runtimeBytes, alignment, executionBankBytes, romAddressSpaceBytes);
+        if (placement.size != 0u)
+            return placement;
+    }
 
     std::size_t tail = alignUp(rom.size(), alignment);
     if (executionBankBytes != 0u &&
         (tail / executionBankBytes) != ((tail + runtimeBytes - 1u) / executionBankBytes))
         tail = alignUp(tail, executionBankBytes);
     if (tail > romAddressSpaceBytes || runtimeBytes > romAddressSpaceBytes - tail)
-        throw std::runtime_error("no verified runtime cave and appended runtime exceeds the 32 MiB GBA ROM address space");
+        throw std::runtime_error(
+            "runtime placement failed: runtime needs " + std::to_string(runtimeBytes) +
+            " bytes, source ROM is " + std::to_string(rom.size()) +
+            " bytes, target writable ROM limit is " + std::to_string(romAddressSpaceBytes) +
+            " bytes, and structurally verified trailing 0xFF padding is only " +
+            std::to_string(holes.trailingFfPadding.size) +
+            " bytes. No exact GBABR safe-hole entry or sufficiently large trailing-FF slot is available, "
+            "and appending would exceed the target. Arbitrary internal 0xFF runs are intentionally not "
+            "overwritten because they can still be referenced game data. The ROM was not modified.");
     return {tail, runtimeBytes, RuntimePlacementSource::AppendedTail, HoleDiscoverySource::None};
 }
 
@@ -240,11 +303,9 @@ std::optional<StorageLayout> tryCreateInternalEraseStorageLayout(
     StorageLayoutKind kind,
     const std::vector<ByteRange> &reservedRanges)
 {
-    if (!holes.gbabrDatabaseMatched || requiredBlockCount == 0u)
+    if (requiredBlockCount == 0u)
         return std::nullopt;
-    auto blocks = blocksFromHoles(
-        holes.databaseErasedHoles, HoleDiscoverySource::GbabrDatabase,
-        physicalEraseBlockBytes, reservedRanges);
+    auto blocks = internalFfBlocks(holes, physicalEraseBlockBytes, reservedRanges);
     if (blocks.size() < requiredBlockCount)
         return std::nullopt;
     blocks.resize(requiredBlockCount);
@@ -437,14 +498,7 @@ StorageLayout createStorageLayout(
     layout.physicalEraseBlockBytes = physicalEraseBlockBytes;
 
     const auto completeInternalAllocation = [&]() {
-        std::vector<StorageBlockPlacement> internalBlocks;
-        if (holes.gbabrDatabaseMatched) {
-            internalBlocks = blocksFromHoles(
-                holes.databaseErasedHoles,
-                HoleDiscoverySource::GbabrDatabase,
-                physicalEraseBlockBytes,
-                reservedRanges);
-        }
+        auto internalBlocks = internalFfBlocks(holes, physicalEraseBlockBytes, reservedRanges);
         if (internalBlocks.size() < requiredBlockCount)
             return std::vector<StorageBlockPlacement>{};
         internalBlocks.resize(requiredBlockCount);
@@ -470,8 +524,30 @@ StorageLayout createStorageLayout(
             layout.blocks = allocateTail(0u, {});
     }
 
-    if (layout.blocks.size() != requiredBlockCount)
-        throw std::runtime_error("save storage cannot be placed: not enough verified erased holes or GBA ROM address space");
+    if (layout.blocks.size() != requiredBlockCount) {
+        const auto verifiedInternal = internalFfBlocks(holes, physicalEraseBlockBytes, reservedRanges);
+        std::size_t appendableBlocks = 0u;
+        std::size_t probe = alignUp(std::max(originalRom.size(), minimumTailOffset), physicalEraseBlockBytes);
+        while (probe <= romAddressSpaceBytes && physicalEraseBlockBytes <= romAddressSpaceBytes - probe) {
+            if (!overlapsAny({probe, physicalEraseBlockBytes}, reservedRanges))
+                ++appendableBlocks;
+            probe += physicalEraseBlockBytes;
+        }
+        throw std::runtime_error(
+            "persistent save storage placement failed: this save strategy needs " +
+            std::to_string(requiredBlockCount) + " block(s) x " +
+            std::to_string(physicalEraseBlockBytes) + " bytes = " +
+            std::to_string(requiredBlockCount * physicalEraseBlockBytes) +
+            " bytes. Verified internal erased blocks available=" +
+            std::to_string(verifiedInternal.size()) + ", appendable blocks within target capacity=" +
+            std::to_string(appendableBlocks) + ", source ROM=" +
+            std::to_string(originalRom.size()) + " bytes, target limit=" +
+            std::to_string(romAddressSpaceBytes) +
+            " bytes. libgbasave will not consume arbitrary internal 0xFF runs without structural/DB proof "
+            "because they may be referenced game data. Next options: use a target with separate SRAM/FRAM, "
+            "use a target with additional writable ROM address space when the source is smaller than that target, "
+            "or provide/derive structural proof for a genuinely unused region. The ROM was not modified.");
+    }
 
     layout.outputSizeBytes = std::max(originalRom.size(), minimumTailOffset);
     for (const auto &entry : layout.blocks)

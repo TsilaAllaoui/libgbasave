@@ -88,9 +88,15 @@ RomHoleCatalog discoverRomHoles(const RomImage &rom)
         break;
     }
 
-    // Deliberately no independent FF/00 fallback. A database miss uses appended
-    // runtime/storage, or fails at the caller's output/capacity policy. Raw fill
-    // bytes alone never prove structural safety.
+    // A contiguous FF run that reaches the file end is different from an
+    // arbitrary internal fill run: there is provably no later source content it
+    // can overlap. Expose it as a structural placement fact. Consumers still
+    // apply target erase/RWW/reserved-range constraints before using it.
+    std::size_t tailStart = rom.size();
+    while (tailStart != 0u && rom.bytes()[tailStart - 1u] == 0xFFu)
+        --tailStart;
+    if (tailStart < rom.size())
+        result.trailingFfPadding = {tailStart, rom.size() - tailStart};
     return result;
 }
 
@@ -99,6 +105,7 @@ std::string toString(HoleDiscoverySource source)
     switch (source) {
     case HoleDiscoverySource::None: return "NONE";
     case HoleDiscoverySource::GbabrDatabase: return "GBABR_DB";
+    case HoleDiscoverySource::TrailingFfPadding: return "TRAILING_FF_PADDING";
     }
     return "UNKNOWN";
 }

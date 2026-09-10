@@ -23,3 +23,13 @@ Key current guards include:
 - SuperFW-first hole selection with local ROM-scan fallback;
 - runtime relocation/undefined-helper audit;
 - FLASH/EEPROM append-only models.
+For recompiled/relocated FLASH1M libraries that keep Nintendo setup/ABI semantics but not stock byte signatures, run the generic semantic fallback regression with any legal fixture:
+
+```sh
+GBASAVE_SEMANTIC_FLASH_FIXTURE=/path/to/recompiled_flash1m.gba \
+GBASAVEHANDLER_BIN=/path/to/GBASaveHandler \
+python3 tests/test_semantic_flash_fallback.py
+```
+
+The regression deliberately contains no game title, game code, hash, or fixed ROM offset. It verifies structural FLASH discovery plus both the banked FRAM route and a NOR-only route.
+

@@ -1,4 +1,5 @@
 #include "gbasave/save_patcher.h"
+#include "gbasave/save_memory_patcher.h"
 #include "gbasave/m36_compat_patcher.h"
 
 #include "gbasave/flash_scanner.h"
@@ -226,6 +227,84 @@ const char *runtimeSymbolForPrimitive(SavePrimitiveRole role)
     throw std::runtime_error("unmapped save primitive role");
 }
 
+void writeThumbReturnZero(RomImage &rom, std::size_t offset)
+{
+    const std::array<std::uint8_t, 4> stub = {0x00u, 0x20u, 0x70u, 0x47u}; // movs r0,#0; bx lr
+    rom.write(offset, stub.data(), stub.size());
+}
+
+const char *runtimeSymbolForAnalyzedFlashOp(std::uint8_t kind)
+{
+    switch (kind) {
+    case SFW_OP_FLASH_READ: return "gbashReadFlash";
+    case SFW_OP_FLASH_ERASE_CHIP: return "gbashEraseFlashChip";
+    case SFW_OP_FLASH_ERASE_SECTOR: return "gbashEraseFlashSector";
+    case SFW_OP_FLASH_WRITE_SECTOR: return "gbashProgramFlashSector";
+    // The SuperFW-derived public ProgramFlashByte ABI is (sector, offset,
+    // value), including FLASH1M setup records.  Keep this separate from the
+    // Nintendo low-level pointer-form primitive.
+    case SFW_OP_FLASH_WRITE_BYTE: return "gbashProgramFlashByteByOffset";
+    case SFW_OP_FLASH_IDENT: return "gbashReadFlashId";
+    case SFW_OP_FLASH_SWITCH_BANK: return "gbashSwitchFlashBank";
+    default: return nullptr;
+    }
+}
+
+void patchAnalyzedFlashApi(
+    RomImage &rom,
+    const RomImage &originalRom,
+    SaveType expectedType,
+    RuntimeImage &runtime,
+    PatchReport &report)
+{
+    const SfwSavePlan plan = SaveMemoryPatcher{}.analyze(originalRom);
+    const std::uint8_t expected = expectedType == SaveType::Flash1M
+        ? SFW_SAVE_FLASH1024K : SFW_SAVE_FLASH512K;
+    if (plan.save_type != expected)
+        throw std::runtime_error(
+            "normalized save-plan type disagrees with the validated FLASH library scan");
+
+    std::size_t bridged = 0u;
+    for (std::size_t index = 0u; index < plan.op_count; ++index) {
+        const auto &op = plan.op[index];
+        if (op.offset >= originalRom.size())
+            throw std::runtime_error("analyzed FLASH operation points outside the source ROM");
+
+        if (op.kind == SFW_OP_RAW_BYTES) {
+            if (op.raw_len > SFW_MAX_RAW_BYTES || op.raw_len > originalRom.size() - op.offset)
+                throw std::runtime_error("analyzed raw save operation exceeds source ROM bounds");
+            rom.write(op.offset, op.raw, op.raw_len);
+            report.routines.push_back({"Analyzed raw save compatibility op", op.offset, 0u});
+            continue;
+        }
+        if (op.kind == SFW_OP_FLASH_VERIFY || op.kind == SFW_OP_RAW_THUMB_RET0) {
+            if (4u > originalRom.size() - op.offset)
+                throw std::runtime_error("analyzed verify/return operation is too close to ROM end");
+            // The backing runtime verifies new snapshot data before commit, so
+            // Nintendo's follow-up FLASH verify wrapper is redundant.  This is
+            // the same public-ABI policy used by the FRAM and compact-M36
+            // composers and avoids guessing between VerifySector/NBytes ABIs.
+            writeThumbReturnZero(rom, op.offset);
+            report.routines.push_back({"Analyzed FLASH verify -> verified-write success", op.offset, 0u});
+            ++bridged;
+            continue;
+        }
+
+        const char *symbol = runtimeSymbolForAnalyzedFlashOp(op.kind);
+        if (!symbol)
+            continue;
+        if (8u > originalRom.size() - op.offset)
+            throw std::runtime_error("analyzed FLASH entry is too small for a Thumb bridge at ROM boundary");
+        const auto target = runtimeAddress(runtime, symbol);
+        writeThumbTailJump(rom, op.offset, target);
+        report.routines.push_back({std::string("Analyzed public FLASH API -> ") + symbol, op.offset, target});
+        ++bridged;
+    }
+
+    if (bridged == 0u)
+        throw std::runtime_error("normalized FLASH save plan contained no patchable public operations");
+}
+
 void patchValidatedPrimitives(
     RomImage &rom,
     const SaveLibraryMatch &saveLibrary,
@@ -451,6 +530,28 @@ void configureEepromStorage(
     report.eepromRecordsPerDword = static_cast<std::uint16_t>(recordsPerDword);
 }
 
+std::size_t compactFlashProgramBlockBytes(std::size_t logicalUnitBytes)
+{
+    // FLASH journal blocks are program-only arenas; they are not NOR erase
+    // units.  CompactV2 therefore sizes them from the save record itself, not
+    // from a particular cartridge geometry.  Three primary generations leave
+    // useful power-loss-safe headroom while keeping 128 KiB FLASH1M practical
+    // in end-of-image padding on full-capacity carts.
+    constexpr std::size_t kPrimaryGenerations = 3u;
+    constexpr std::size_t kMetadataAndBreadcrumbReserve = 0x100u;
+    if (logicalUnitBytes == 0u ||
+        logicalUnitBytes > (static_cast<std::size_t>(-1) - kMetadataAndBreadcrumbReserve) / kPrimaryGenerations)
+        throw std::runtime_error("invalid FLASH logical-unit size for compact journal");
+    const std::size_t required = logicalUnitBytes * kPrimaryGenerations + kMetadataAndBreadcrumbReserve;
+    std::size_t block = 1u;
+    while (block < required) {
+        if (block > static_cast<std::size_t>(-1) / 2u)
+            throw std::runtime_error("FLASH compact journal size overflow");
+        block <<= 1u;
+    }
+    return block;
+}
+
 void configureFlashStorage(
     const RomImage &originalRom,
     const RomHoleCatalog &holes,
@@ -462,12 +563,15 @@ void configureFlashStorage(
 {
     runtimeConfig.protocol = static_cast<std::uint16_t>(RuntimeProtocol::Flash);
     const std::size_t unitCount = runtimeConfig.logicalUnitCount;
+    const std::size_t programBlockBytes = options.storagePolicy == StoragePolicy::CompactV2
+        ? compactFlashProgramBlockBytes(runtimeConfig.logicalUnitSizeBytes)
+        : options.programStorageBlockBytes;
     report.storage = createStorageLayout(
         originalRom,
         holes,
         minimumTailOffset,
         options.romAddressSpaceBytes,
-        options.programStorageBlockBytes,
+        programBlockBytes,
         unitCount + options.flashSpillBlockCount,
         StorageLayoutKind::FlashVersionedSlots,
         true,
@@ -584,6 +688,16 @@ void rewriteDirectSramLiterals(
 
 } // namespace
 
+const char *toString(PatchStrategy strategy)
+{
+    switch (strategy) {
+    case PatchStrategy::SharedPrimitiveRuntime: return "SHARED_PRIMITIVE_RUNTIME";
+    case PatchStrategy::ExactDirectRww: return "EXACT_DIRECT_RWW";
+    case PatchStrategy::AnalyzedDirectRww: return "ANALYZED_DIRECT_RWW";
+    }
+    return "UNKNOWN";
+}
+
 PatchOptions makePatchOptionsForNorProfile(const NorTargetProfileDescriptor &target)
 {
     PatchOptions options;
@@ -610,26 +724,54 @@ PatchReport SavePatcher::patchToTargetStorage(
     PatchOptions effectiveOptions = options;
     effectiveOptions.romAddressSpaceBytes = std::min(
         effectiveOptions.romAddressSpaceBytes, backend.romAddressSpaceLimit);
-    if (rom.size() > effectiveOptions.romAddressSpaceBytes)
-        throw std::runtime_error("source ROM exceeds selected target/profile capacity");
+    if (rom.size() > effectiveOptions.romAddressSpaceBytes) {
+        const std::string targetKey = effectiveOptions.targetProfileKey.empty()
+            ? std::string(backend.profileKey) : effectiveOptions.targetProfileKey;
+        throw std::runtime_error(
+            "target capacity is too small: source ROM is " + std::to_string(rom.size()) +
+            " bytes, while target '" + targetKey + "' can address only " +
+            std::to_string(effectiveOptions.romAddressSpaceBytes) +
+            " bytes. This is a physical target-size limit, not a save-analyzer failure. "
+            "Next options: choose a target that exposes at least the source ROM size, or use a different "
+            "cart whose mapping provides that ROM capacity. libgbasave will not truncate or silently shrink the ROM.");
+    }
 
     if (saveLibrary.requiresDirectSramProtocolEngine && !backend.supportsDirectProtocolEngine)
         throw std::runtime_error(
-            "exact-plan SRAM_F fast SDK layout requires a backend with a qualified direct SRAM protocol engine");
-    if (backend.supportsDirectProtocolEngine) {
-        if (!canUseM36HardwareProvenRoute(rom, saveLibrary))
-            throw std::runtime_error("direct protocol route requires an exact shared GBABR plan; refusing generic fallback");
-        if (saveLibrary.type == SaveType::Sram || saveLibrary.type == SaveType::Flash1M)
-            return patchM36HardwareProvenRoute(rom, saveLibrary, effectiveOptions);
-        // FLASH512 and both EEPROM geometries intentionally use the shared
-        // primitive runtime after this exact-plan gate.
-    }
+            "the analyzed save ABI uses the fast SRAM calling convention and therefore requires "
+            "a target with the qualified direct-SRAM protocol engine. The selected target does "
+            "not provide that capability; the ROM was not modified.");
+
+    // A direct engine is a target capability, not a requirement that every ROM
+    // appear in the exact-plan database. Prefer the hardware-proven exact route
+    // when present, then let structurally analyzed protocols use a qualified
+    // generic direct composer where one exists.
+    const bool hasQualifiedExactDirectPlan =
+        backend.supportsDirectProtocolEngine && canUseM36HardwareProvenRoute(rom, saveLibrary);
+    if (hasQualifiedExactDirectPlan &&
+        (saveLibrary.type == SaveType::Sram ||
+         saveLibrary.type == SaveType::Flash512 ||
+         saveLibrary.type == SaveType::Flash1M))
+        return patchM36HardwareProvenRoute(rom, saveLibrary, effectiveOptions);
+
+    if (backend.supportsDirectProtocolEngine &&
+        (saveLibrary.type == SaveType::Flash512 || saveLibrary.type == SaveType::Flash1M))
+        return patchM36AnalyzedFlashRoute(rom, saveLibrary, effectiveOptions);
+
+    if (saveLibrary.requiresDirectSramProtocolEngine && !hasQualifiedExactDirectPlan)
+        throw std::runtime_error(
+            "the analyzed SRAM_F fast ABI requires the target's direct protocol engine, but no "
+            "complete structurally compatible direct patch plan was proven for this ROM. Generic "
+            "fallback is disabled for this ABI because silently using the normal SRAM calling "
+            "convention can corrupt saves; the ROM was not modified.");
 
     const RomImage originalRom = rom;
     const RomHoleCatalog holes = discoverRomHoles(originalRom);
     RuntimeImage runtime = loadEmbeddedRuntimeImage(options.norFlashType);
+    const std::size_t runtimePlacementLimit = std::min(
+        effectiveOptions.romAddressSpaceBytes, backend.mutableMainArrayEnd);
     const RuntimePlacement runtimePlacement = createRuntimePlacement(
-        originalRom, holes, runtime.bytes.size(), effectiveOptions.romAddressSpaceBytes, 4u,
+        originalRom, holes, runtime.bytes.size(), runtimePlacementLimit, 4u,
         backend.runtimeExecutionBankBytes);
     if (runtimePlacement.end() > backend.mutableMainArrayEnd)
         throw std::runtime_error("runtime enters backend-reserved non-mutable NOR area");
@@ -637,6 +779,7 @@ PatchReport SavePatcher::patchToTargetStorage(
 
     PatchReport report;
     report.saveType = saveLibrary.type;
+    report.strategy = PatchStrategy::SharedPrimitiveRuntime;
     report.runtimeOffset = runtimePlacement.offset;
     report.runtimeSize = runtime.bytes.size();
     report.runtimePlacementSource = runtimePlacement.source;
@@ -683,8 +826,22 @@ PatchReport SavePatcher::patchToTargetStorage(
     FlashMap flash1mMap;
     const bool flash1mPlanPrimitives =
         saveLibrary.type == SaveType::Flash1M && !saveLibrary.primitiveHooks.empty();
-    if (saveLibrary.type == SaveType::Flash1M && !flash1mPlanPrimitives)
-        flash1mMap = configureFlash1mStockDriver(originalRom, report.forcedFlashId, runtimeConfig);
+    bool useAnalyzedPublicFlashApi = false;
+    if (saveLibrary.type == SaveType::Flash1M && !flash1mPlanPrimitives) {
+        try {
+            flash1mMap = configureFlash1mStockDriver(originalRom, report.forcedFlashId, runtimeConfig);
+        } catch (const std::runtime_error &) {
+            // A complete normalized public save plan is an independent proof
+            // path used by the FRAM/direct composers.  If primitive discovery
+            // is ambiguous (common in heavily rebuilt ROM hacks), bridge those
+            // proven public APIs to the same target-generic runtime instead of
+            // requiring a ROM identity exception.
+            const SfwSavePlan plan = SaveMemoryPatcher{}.analyze(originalRom);
+            if (plan.save_type != SFW_SAVE_FLASH1024K)
+                throw;
+            useAnalyzedPublicFlashApi = true;
+        }
+    }
 
     patchRuntimeConfig(runtime, runtimeConfig);
     if (saveLibrary.type == SaveType::Sram &&
@@ -700,7 +857,9 @@ PatchReport SavePatcher::patchToTargetStorage(
     report.storagePreserveMode = storageImage.preservationMode;
     rom.write(runtimePlacement.offset, runtime.bytes.data(), runtime.bytes.size());
 
-    if (saveLibrary.type == SaveType::Flash1M && !flash1mPlanPrimitives)
+    if (saveLibrary.type == SaveType::Flash1M && useAnalyzedPublicFlashApi)
+        patchAnalyzedFlashApi(rom, originalRom, saveLibrary.type, runtime, report);
+    else if (saveLibrary.type == SaveType::Flash1M && !flash1mPlanPrimitives)
         patchFlash1m(rom, flash1mMap, runtime, report);
     else
         patchValidatedPrimitives(rom, saveLibrary, runtime, report);
